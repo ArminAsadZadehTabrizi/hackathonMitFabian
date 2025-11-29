@@ -375,7 +375,8 @@ async def chat_query(request: dict, session: SessionDep):
             )
             
             receipts_data.append({
-                "id": f"db_{receipt.id}",
+                "id": str(receipt.id),  # Use numeric ID without prefix for frontend links
+                "receiptNumber": f"RCP-{receipt.id:04d}",
                 "metadata": {
                     "vendor_name": receipt.vendor_name,
                     "date": receipt.date.isoformat() if receipt.date else "",
@@ -425,6 +426,7 @@ async def chat_query(request: dict, session: SessionDep):
         for r in receipts_data:
             receipts_list.append({
                 "id": r["id"],
+                "receiptNumber": r.get("receiptNumber", f"RCP-{r['id']}"),
                 "vendor": r["metadata"].get("vendor_name", "Unknown"),
                 "date": r["metadata"].get("date", ""),
                 "total": r["metadata"].get("total", 0),
