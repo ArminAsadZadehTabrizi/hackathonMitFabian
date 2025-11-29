@@ -1,6 +1,6 @@
 """
 🧠 AI Backend für Quittungs-Analyse
-FastAPI Server mit Ollama LLM + ChromaDB RAG
+FastAPI Server mit Ollama LLM + ChromaDB RAG + SQLite DB
 
 Endpoints:
     - POST /api/extract     - Extrahiert Daten aus Quittungsbild
@@ -8,12 +8,18 @@ Endpoints:
     - GET  /api/search      - Semantische Suche in Quittungen
     - GET  /api/health      - Health Check
     - POST /api/ingest      - Daten in RAG laden
+    - GET  /api/receipts    - Alle Quittungen aus DB
+    - GET  /api/audit       - Geflaggte Quittungen
+    - POST /api/ingest/db   - Quittung in DB speichern
 """
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from typing import Annotated
+from sqlmodel import Session, select, func
 import base64
 import uvicorn
+from datetime import datetime
 
 from config import API_HOST, API_PORT
 from models.receipt import (
@@ -22,6 +28,8 @@ from models.receipt import (
     ChatRequest,
     ChatMessage
 )
+from models.db_models import ReceiptDB, LineItemDB
+from models.db_schemas import ReceiptCreateDB, ReceiptReadDB
 from services.ollama_service import (
     extract_receipt_from_image,
     generate_chat_response,
@@ -36,22 +44,30 @@ from services.rag_service import (
 )
 from services.analytics_service import calculate_precise_answer
 from services.cord_ingestion import load_demo_data, ingest_cord_to_rag
+from services.database import init_db, get_session
+from services.audit import run_audit
+
+# Type alias für Dependency Injection
+SessionDep = Annotated[Session, Depends(get_session)]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup & Shutdown Events"""
     print("🚀 AI Backend startet...")
+    print("📊 Datenbank wird initialisiert...")
+    init_db()
+    print("🧠 RAG System wird initialisiert...")
     init_rag()
-    print("✅ RAG System bereit!")
+    print("✅ Alle Systeme bereit!")
     yield
     print("👋 AI Backend wird beendet...")
 
 
 app = FastAPI(
-    title="Finanz AI Backend",
-    description="AI-powered Receipt Analysis with Local LLM",
-    version="1.0.0",
+    title="Finanz AI Backend (Integriert)",
+    description="AI-powered Receipt Analysis with Local LLM + Database + Audit System",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -116,10 +132,11 @@ async def extract_receipt(request: ReceiptExtractionRequest):
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
 
-@app.post("/api/extract/upload", response_model=Receipt)
-async def extract_receipt_upload(file: UploadFile = File(...)):
+@app.post("/api/extract/upload")
+async def extract_receipt_upload(file: UploadFile = File(...), session: Session = Depends(get_session)):
     """
     Extrahiert Daten aus einem hochgeladenen Quittungsbild.
+    Speichert die Daten sowohl in RAG als auch in der SQL-Datenbank.
     """
     try:
         # Datei lesen und zu Base64 konvertieren
@@ -128,12 +145,93 @@ async def extract_receipt_upload(file: UploadFile = File(...)):
         
         receipt = await extract_receipt_from_image(image_base64=image_base64)
         
-        # Zur RAG-DB hinzufügen
+        # Validierung (optional - für Debugging)
+        from services.receipt_validator import validate_receipt
+        validation = validate_receipt(receipt)
+        if validation["status"] != "valid":
+            print(f"⚠️  Quittung hat {len(validation['warnings'])} Warnungen")
+        
+        # 1. Zur RAG-DB hinzufügen (für semantische Suche)
         receipt_id = f"upload_{file.filename}"
         add_receipt_to_rag(receipt, receipt_id)
         receipt.id = receipt_id
         
-        return receipt
+        # 2. Zur SQL-Datenbank hinzufügen (für strukturierte Queries & Audit)
+        try:
+            # Datum parsen (falls als String vorhanden)
+            receipt_date = datetime.now()
+            if receipt.date:
+                try:
+                    if isinstance(receipt.date, str):
+                        receipt_date = datetime.fromisoformat(receipt.date.replace('Z', '+00:00'))
+                    else:
+                        receipt_date = receipt.date
+                except:
+                    print(f"⚠️  Konnte Datum nicht parsen: {receipt.date}")
+            
+            # ReceiptDB erstellen
+            receipt_db = ReceiptDB(
+                vendor_name=receipt.vendor_name,
+                date=receipt_date,
+                total_amount=receipt.total,
+                tax_amount=receipt.tax or 0.0,
+                currency=receipt.currency,
+                category=receipt.category
+            )
+            
+            # Line Items erstellen
+            line_items_db = [
+                LineItemDB(
+                    description=item.description,
+                    amount=item.total_price
+                )
+                for item in receipt.line_items
+            ]
+            
+            # Zur Datenbank hinzufügen
+            session.add(receipt_db)
+            session.flush()
+            
+            # Line Items verknüpfen
+            for item in line_items_db:
+                item.receipt_id = receipt_db.id
+                session.add(item)
+            
+            # Audit durchführen
+            receipt_db = run_audit(receipt_db, line_items_db, session)
+            
+            session.commit()
+            session.refresh(receipt_db)
+            
+            print(f"✅ Quittung in Datenbank gespeichert (ID: {receipt_db.id})")
+            
+            # Response mit Validierungs-Info und DB-ID erweitern
+            response_data = receipt.dict()
+            response_data["validation"] = {
+                "status": validation["status"],
+                "warnings_count": len(validation["warnings"])
+            }
+            response_data["db_id"] = receipt_db.id
+            response_data["audit_flags"] = {
+                "duplicate": receipt_db.flag_duplicate,
+                "suspicious": receipt_db.flag_suspicious,
+                "missing_vat": receipt_db.flag_missing_vat,
+                "math_error": receipt_db.flag_math_error
+            }
+            
+            return response_data
+            
+        except Exception as db_error:
+            print(f"⚠️  Fehler beim Speichern in DB: {db_error}")
+            # Trotzdem die Quittung zurückgeben (RAG ist ja gespeichert)
+            response_data = receipt.dict()
+            response_data["validation"] = {
+                "status": validation["status"],
+                "warnings_count": len(validation["warnings"])
+            }
+            response_data["db_error"] = str(db_error)
+            return response_data
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
@@ -251,22 +349,150 @@ async def add_receipt(receipt: Receipt):
 # ============== ANALYTICS HELPER ==============
 
 @app.get("/api/analytics/categories")
-async def get_spending_by_category():
+async def get_spending_by_category(session: SessionDep):
     """
     Gibt Ausgaben pro Kategorie zurück.
-    (Einfache Implementierung - Person 2 macht die echte Logik in SQL)
+    Nutzt SQL-Aggregationen für präzise Berechnungen.
     """
-    # Das hier ist ein Placeholder - die echte Logik macht Person 2
-    # mit SQL Aggregationen in der Haupt-DB
-    results = search_receipts("alle Ausgaben", n_results=100)
+    statement = (
+        select(
+            ReceiptDB.category,
+            func.sum(ReceiptDB.total_amount).label("total")
+        )
+        .where(ReceiptDB.category.is_not(None))
+        .group_by(ReceiptDB.category)
+        .order_by(func.sum(ReceiptDB.total_amount).desc())
+    )
     
-    categories = {}
-    for r in results:
-        cat = r["metadata"].get("category", "Sonstiges")
-        total = r["metadata"].get("total", 0)
-        categories[cat] = categories.get(cat, 0) + total
+    results = session.exec(statement).all()
     
-    return {"spending_by_category": categories}
+    return {
+        "category_totals": [
+            {"category": category, "total": round(float(total), 2)}
+            for category, total in results
+        ]
+    }
+
+
+@app.get("/api/analytics/monthly")
+def get_monthly_analytics(session: SessionDep):
+    """
+    Monatliche Analytics: Gesamtbetrag pro Monat (YYYY-MM).
+    
+    Returns:
+        Liste mit {month: "YYYY-MM", total: float}
+    """
+    # SQLite verwendet strftime für Datumsformatierung
+    # %Y-%m gibt uns YYYY-MM Format
+    statement = (
+        select(
+            func.strftime("%Y-%m", ReceiptDB.date).label("month"),
+            func.sum(ReceiptDB.total_amount).label("total")
+        )
+        .group_by(func.strftime("%Y-%m", ReceiptDB.date))
+        .order_by(func.strftime("%Y-%m", ReceiptDB.date))
+    )
+    
+    results = session.exec(statement).all()
+    
+    return {
+        "monthly_totals": [
+            {"month": month, "total": round(float(total), 2)}
+            for month, total in results
+        ]
+    }
+
+
+# ============== DATABASE RECEIPTS (von Partner 2) ==============
+
+@app.get("/api/receipts")
+def get_receipts(session: SessionDep):
+    """Holt alle Quittungen mit ihren Audit-Flags."""
+    statement = select(ReceiptDB)
+    receipts = session.exec(statement).all()
+    return {
+        "count": len(receipts),
+        "receipts": receipts
+    }
+
+
+@app.get("/api/audit")
+def get_audit_receipts(session: SessionDep):
+    """
+    Holt alle Quittungen, die mindestens ein Audit-Flag gesetzt haben.
+    
+    Nützlich für die Anzeige geflaggter Quittungen auf der Audit-Seite.
+    
+    Returns:
+        Liste der Quittungen mit mindestens einem gesetzten Audit-Flag
+    """
+    statement = select(ReceiptDB).where(
+        (ReceiptDB.flag_duplicate == True) |
+        (ReceiptDB.flag_suspicious == True) |
+        (ReceiptDB.flag_missing_vat == True) |
+        (ReceiptDB.flag_math_error == True)
+    )
+    flagged_receipts = session.exec(statement).all()
+    return {
+        "count": len(flagged_receipts),
+        "flagged_receipts": flagged_receipts
+    }
+
+
+@app.post("/api/ingest/db", response_model=ReceiptReadDB)
+def ingest_receipt_to_db(receipt_data: ReceiptCreateDB, session: SessionDep):
+    """
+    Speichert eine neue Quittung mit Line Items in der Datenbank.
+    
+    Führt automatisch Audit-Checks durch:
+    - Fehlende MwSt.-Erkennung
+    - Rechenfehler-Erkennung (Summe der Line Items vs. Gesamt)
+    - Verdächtige Items-Erkennung (Alkohol/Tabak)
+    - Duplikats-Erkennung
+    
+    Args:
+        receipt_data: Quittungsdaten mit Line Items
+        session: Datenbank-Session
+        
+    Returns:
+        Erstellte Quittung mit Audit-Flags und Line Items
+    """
+    # Receipt-Objekt erstellen (ohne Line Items zuerst)
+    receipt = ReceiptDB(
+        vendor_name=receipt_data.vendor_name,
+        date=receipt_data.date,
+        total_amount=receipt_data.total_amount,
+        tax_amount=receipt_data.tax_amount,
+        currency=receipt_data.currency,
+        category=receipt_data.category
+    )
+    
+    # Line Items erstellen
+    line_items = [
+        LineItemDB(
+            description=item.description,
+            amount=item.amount
+        )
+        for item in receipt_data.items
+    ]
+    
+    # Receipt zur Session hinzufügen um ID zu bekommen (für Duplikats-Check)
+    session.add(receipt)
+    session.flush()  # ID holen ohne zu committen
+    
+    # Line Items mit Receipt verknüpfen
+    for item in line_items:
+        item.receipt_id = receipt.id
+        session.add(item)
+    
+    # Audit-Checks durchführen
+    receipt = run_audit(receipt, line_items, session)
+    
+    # Alles committen
+    session.commit()
+    session.refresh(receipt)
+    
+    return receipt
 
 
 if __name__ == "__main__":
