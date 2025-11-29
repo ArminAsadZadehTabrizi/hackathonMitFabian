@@ -45,3 +45,4 @@ echo "   cat INTEGRATION_PARTNER2.md"
 echo ""
 echo "🎉 Integration erfolgreich!"
 
+

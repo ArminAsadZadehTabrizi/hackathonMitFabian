@@ -115,3 +115,4 @@ echo '     -H "Content-Type: application/json" \'
 echo '     -d '\''{"message": "Wie viel habe ich für Essen ausgegeben?"}'\'''
 echo ""
 
+

@@ -55,3 +55,4 @@ class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
 
+

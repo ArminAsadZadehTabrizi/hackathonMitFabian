@@ -231,7 +231,6 @@ async def extract_receipt_upload(file: UploadFile = File(...), session: Session 
             }
             response_data["db_error"] = str(db_error)
             return response_data
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
@@ -436,6 +435,97 @@ def get_audit_receipts(session: SessionDep):
     return {
         "count": len(flagged_receipts),
         "flagged_receipts": flagged_receipts
+    }
+
+
+@app.post("/api/ingest")
+def ingest_receipt(receipt_data: ReceiptCreateDB, session: SessionDep):
+    """
+    🎯 Hauptendpoint für LLM-Outputs von CORD-Analyse.
+    
+    Erwartet JSON im Format:
+    {
+        "vendor_name": "Saturn",
+        "date": "2023-11-29T10:00:00",
+        "total_amount": 150.00,
+        "tax_amount": 28.50,
+        "currency": "EUR",
+        "category": "Hardware",
+        "items": [
+            {"description": "Monitor", "amount": 150.00}
+        ]
+    }
+    
+    Speichert in DB + RAG und führt Audit-Checks durch.
+    """
+    # Receipt-Objekt erstellen
+    receipt = ReceiptDB(
+        vendor_name=receipt_data.vendor_name,
+        date=receipt_data.date,
+        total_amount=receipt_data.total_amount,
+        tax_amount=receipt_data.tax_amount,
+        currency=receipt_data.currency,
+        category=receipt_data.category
+    )
+    
+    # Line Items erstellen
+    line_items = [
+        LineItemDB(
+            description=item.description,
+            amount=item.amount
+        )
+        for item in receipt_data.items
+    ]
+    
+    # Receipt zur Session hinzufügen
+    session.add(receipt)
+    session.flush()
+    
+    # Line Items verknüpfen
+    for item in line_items:
+        item.receipt_id = receipt.id
+        session.add(item)
+    
+    # Audit-Checks durchführen
+    receipt = run_audit(receipt, line_items, session)
+    
+    # Auch zur RAG-DB hinzufügen (für semantische Suche)
+    try:
+        from models.receipt import Receipt as RAGReceipt, LineItem as RAGLineItem
+        rag_receipt = RAGReceipt(
+            id=f"db_{receipt.id}",
+            vendor_name=receipt.vendor_name,
+            date=receipt.date.isoformat() if receipt.date else None,
+            total=receipt.total_amount,
+            tax=receipt.tax_amount,
+            currency=receipt.currency,
+            category=receipt.category,
+            line_items=[
+                RAGLineItem(
+                    description=item.description,
+                    total_price=item.amount,
+                    quantity=1
+                )
+                for item in line_items
+            ]
+        )
+        add_receipt_to_rag(rag_receipt, f"db_{receipt.id}")
+    except Exception as e:
+        print(f"⚠️  RAG-Speicherung fehlgeschlagen: {e}")
+    
+    session.commit()
+    session.refresh(receipt)
+    
+    return {
+        "status": "success",
+        "message": f"Quittung von {receipt.vendor_name} gespeichert",
+        "receipt_id": receipt.id,
+        "audit_flags": {
+            "duplicate": receipt.flag_duplicate,
+            "suspicious": receipt.flag_suspicious,
+            "missing_vat": receipt.flag_missing_vat,
+            "math_error": receipt.flag_math_error
+        }
     }
 
 

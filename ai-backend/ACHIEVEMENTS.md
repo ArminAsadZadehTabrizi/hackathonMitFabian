@@ -290,3 +290,4 @@ curl http://localhost:8000/api/analytics/categories
 
 **Du hast ein professionelles, lokales AI-System aufgebaut - komplett auf deinem PC! 🎉**
 
+
