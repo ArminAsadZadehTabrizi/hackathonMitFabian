@@ -217,43 +217,69 @@ async def generate_chat_response(
     # System Prompt with precise calculations (bilingual)
     if calculations:
         calc_text = "\n\n" + "="*60 + "\n"
-        calc_text += "⚠️ CRITICAL: PRECISE CALCULATIONS (Python - 100% correct!)\n"
+        calc_text += "📊 PRECISE CALCULATIONS (Python - 100% correct!)\n"
         calc_text += "="*60 + "\n\n"
         
-        # Extract the ONE relevant number
-        main_total = None
-        main_count = None
-        main_filter = None
+        # Extract the main result
+        result = calculations.get('result', {})
+        main_total = result.get('total', 0)
+        main_count = result.get('count', 0)
+        main_avg = result.get('average', 0)
+        main_filter = result.get('filter', 'all receipts')
         
-        for key, value in calculations.items():
-            if isinstance(value, dict) and "total" in value:
-                main_total = value['total']
-                main_count = value.get('count', 0)
-                main_filter = value.get('filter', key.replace('total_', '').replace('_', ' ').title())
-                
-                # Show the ONE important number clearly
-                calc_text += f"🎯 FINAL ANSWER (use EXACTLY this number!):\n"
-                calc_text += f"   Gesamtbetrag/Total: {main_total}€\n"
-                calc_text += f"   Anzahl/Count: {main_count} receipts\n"
-                calc_text += f"   Filter: {main_filter}\n\n"
-                
-                # Details (if available)
-                if "receipts" in value and len(value["receipts"]) > 0:
-                    calc_text += f"Details (first 5 receipts):\n"
-                    for i, item in enumerate(value["receipts"][:5], 1):
-                        calc_text += f"  {i}. {item.get('vendor', 'Unknown')}: {item.get('total', 0)}€\n"
-                    calc_text += "\n"
-                
-                break  # Only the first (most important) calculation
+        # Main numbers - CRITICAL for LLM
+        calc_text += f"🎯 MAIN RESULTS (use EXACTLY these numbers!):\n"
+        calc_text += f"   Gesamtbetrag/Total: {main_total}€\n"
+        calc_text += f"   Anzahl/Count: {main_count} receipts\n"
+        calc_text += f"   Durchschnitt/Average: {main_avg}€\n"
+        calc_text += f"   Filter: {main_filter}\n\n"
+        
+        # Min/Max
+        min_data = result.get('min', {})
+        max_data = result.get('max', {})
+        if min_data.get('vendor'):
+            calc_text += f"📉 Smallest receipt: {min_data.get('total', 0)}€ ({min_data.get('vendor', 'Unknown')})\n"
+        if max_data.get('vendor'):
+            calc_text += f"📈 Largest receipt: {max_data.get('total', 0)}€ ({max_data.get('vendor', 'Unknown')})\n"
+        calc_text += "\n"
+        
+        # Top Vendors
+        top_vendors = result.get('top_vendors', [])
+        if top_vendors:
+            calc_text += f"🏪 Top Vendors:\n"
+            for i, v in enumerate(top_vendors[:3], 1):
+                calc_text += f"   {i}. {v.get('vendor', 'Unknown')}: {v.get('total', 0)}€\n"
+            calc_text += "\n"
+        
+        # Top Categories
+        top_cats = result.get('top_categories', [])
+        if top_cats:
+            calc_text += f"📁 Top Categories:\n"
+            for i, c in enumerate(top_cats[:3], 1):
+                calc_text += f"   {i}. {c.get('category', 'Unknown')}: {c.get('total', 0)}€\n"
+            calc_text += "\n"
+        
+        # Receipt details
+        receipts = result.get('receipts', [])
+        if receipts:
+            calc_text += f"📄 Receipt Details (first {min(len(receipts), 10)}):\n"
+            for i, r in enumerate(receipts[:10], 1):
+                flags = []
+                if r.get('flags', {}).get('duplicate'): flags.append('⚠️DUP')
+                if r.get('flags', {}).get('suspicious'): flags.append('🚨SUS')
+                if r.get('flags', {}).get('missing_vat'): flags.append('❌VAT')
+                if r.get('flags', {}).get('math_error'): flags.append('🔢ERR')
+                flag_str = ' '.join(flags) if flags else ''
+                calc_text += f"   {i}. {r.get('vendor', 'Unknown')}: {r.get('total', 0)}€ ({r.get('category', '')}) {flag_str}\n"
+            calc_text += "\n"
         
         calc_text += "="*60 + "\n"
-        calc_text += "⚠️ THE NUMBER AFTER 'Gesamtbetrag/Total:' IS THE ANSWER!\n"
-        calc_text += "⚠️ COPY IT EXACTLY - DO NOT CALCULATE YOURSELF!\n"
+        calc_text += "⚠️ USE THE NUMBER AFTER 'Gesamtbetrag/Total:' AS YOUR ANSWER!\n"
         calc_text += "="*60 + "\n"
         
         # Debug: Show calculations
         print(f"📊 Precise calculations for Ollama:")
-        print(f"   result: {main_total}€")
+        print(f"   Total: {main_total}€, Count: {main_count}, Avg: {main_avg}€")
     else:
         calc_text = ""
     
