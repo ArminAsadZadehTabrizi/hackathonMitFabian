@@ -15,7 +15,7 @@ engine = create_engine(
 def init_db() -> None:
     """Initialize database and create all tables."""
     SQLModel.metadata.create_all(engine)
-    print("✓ Database initialized successfully")
+    print("Database initialized successfully")
 
 
 def get_session() -> Generator[Session, None, None]:
