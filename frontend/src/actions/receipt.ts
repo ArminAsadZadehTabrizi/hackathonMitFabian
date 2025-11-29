@@ -9,13 +9,12 @@ import axiosInstance, { fetcher, endpoints } from 'src/lib/axios';
 // ----------------------------------------------------------------------
 
 const swrOptions: SWRConfiguration = {
-  revalidateIfStale: false,
+  revalidateIfStale: true,
   revalidateOnFocus: false,
-  revalidateOnReconnect: false,
-  // Deaktiviere SSR für Receipts (verhindert 404 beim Server-Side Rendering)
-  fallbackData: undefined,
-  // Nur Client-Side fetchen
-  fetcher: typeof window !== 'undefined' ? undefined : undefined,
+  revalidateOnReconnect: true,
+  errorRetryCount: 3,
+  errorRetryInterval: 1000,
+  dedupingInterval: 2000,
 };
 
 // ----------------------------------------------------------------------

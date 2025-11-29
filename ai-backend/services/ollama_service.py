@@ -257,58 +257,61 @@ async def generate_chat_response(
     else:
         calc_text = ""
     
-    # Detect language of question
-    is_english = any(word in question.lower() for word in ['how', 'what', 'which', 'show', 'find', 'total', 'spent', 'much', 'many', 'all', 'receipts', 'the', 'did', 'does', 'have', 'has', 'where', 'when', 'who', 'why'])
+    # Detect language of question - check for German words first (more specific)
+    german_words = ['wie', 'viel', 'zeig', 'alle', 'quittungen', 'ausgaben', 'habe', 'ich', 'und', 'von', 'für', 'der', 'die', 'das', 'ein', 'eine', 'über', 'unter', 'euro', 'insgesamt', 'welche', 'wann', 'wo', 'wer', 'warum', 'gib', 'mir', 'finde', 'suche']
+    english_words = ['how', 'what', 'which', 'show', 'find', 'spent', 'much', 'many', 'receipts', 'the', 'did', 'does', 'have', 'has', 'where', 'when', 'who', 'why', 'total', 'from', 'all']
+    
+    question_lower = question.lower()
+    german_count = sum(1 for word in german_words if word in question_lower)
+    english_count = sum(1 for word in english_words if word in question_lower)
+    
+    is_english = english_count > german_count
     
     if is_english:
-        system_prompt = f"""You are a professional financial auditor and bookkeeping assistant.
-You analyze receipts and answer questions about expenses based on the provided data.
+        system_prompt = f"""You are an expert financial auditor AI assistant for a small business bookkeeping system.
 
-RESPOND IN ENGLISH ONLY!
+YOUR ROLE: Answer questions about receipts and expenses accurately and helpfully.
 
-AVAILABLE RECEIPT DATA:
+AVAILABLE DATA:
 {context}
 {calc_text}
 
-⚠️ CRITICAL RULES - FOLLOW EXACTLY:
-1. RESPOND IN ENGLISH!
-2. ⚠️ ABSOLUTELY CRITICAL: When you see "Gesamtbetrag/Total: X€" in the calculations, that IS the final answer!
-3. ⚠️ Copy this number EXACTLY - do NOT calculate yourself! The number is already correct!
-4. ⚠️ NEVER do math yourself - always use the pre-calculated numbers!
-5. Format money amounts with € symbol (e.g., €11,456.97)
-6. Be precise and specific - mention concrete numbers and amounts
-7. If multiple receipts were found, mention the count
-8. If precise calculations are available, START your answer with the total amount
+INSTRUCTIONS:
+1. LANGUAGE: Respond in English
+2. USE PRE-CALCULATED NUMBERS: The "Gesamtbetrag/Total" value is already calculated by Python and is 100% accurate. USE IT DIRECTLY.
+3. FORMAT: Start with the main answer (total amount), then provide details
+4. CURRENCY: Format as €X,XXX.XX (e.g., €11,456.97)
+5. BE SPECIFIC: Always mention the exact count and amounts
 
-RESPONSE FORMAT:
-"Based on the calculations, the total amount is €[NUMBER FROM Gesamtbetrag/Total]. This includes [COUNT] receipts."
+EXAMPLE RESPONSES:
+- "The total spending is €11,456.97 across 50 receipts."
+- "I found 6 receipts from Saturn totaling €1,694.20."
+- "Electronics expenses amount to €2,340.00 from 8 receipts."
 
-IMPORTANT: Use the number from "Gesamtbetrag/Total:" - do NOT recalculate!
+If you see "Gesamtbetrag/Total: 1234.56€" in the calculations, your answer should include "€1,234.56" - do not recalculate!
 """
     else:
-        system_prompt = f"""Du bist ein professioneller Finanz-Auditor und Buchhalter-Assistent.
-Du analysierst Quittungen und beantwortest Fragen zu Ausgaben basierend auf den Daten.
+        system_prompt = f"""Du bist ein Experte für Finanz-Auditing und ein KI-Assistent für ein Buchhaltungssystem.
 
-ANTWORTE NUR AUF DEUTSCH!
+DEINE ROLLE: Beantworte Fragen zu Quittungen und Ausgaben präzise und hilfreich.
 
-VERFÜGBARE QUITTUNGSDATEN:
+VERFÜGBARE DATEN:
 {context}
 {calc_text}
 
-⚠️ KRITISCHE REGELN:
-1. ANTWORTE AUF DEUTSCH!
-2. ⚠️ ABSOLUT KRITISCH: Wenn du "Gesamtbetrag/Total: X€" siehst, ist das die FINALE ANTWORT!
-3. ⚠️ Kopiere diese Zahl EXAKT - rechne NICHT selbst! Die Zahl ist bereits korrekt!
-4. ⚠️ NIE selbst rechnen - immer die berechneten Zahlen verwenden!
-5. Formatiere Geldbeträge mit € Symbol (z.B. 11.456,97€)
-6. Sei präzise - nenne konkrete Zahlen und Beträge
-7. Wenn mehrere Quittungen gefunden wurden, erwähne die Anzahl
-8. Beginne mit der Gesamtsumme wenn Berechnungen vorhanden sind
+ANWEISUNGEN:
+1. SPRACHE: Antworte auf Deutsch
+2. NUTZE VORBERECHNETE ZAHLEN: Der "Gesamtbetrag/Total" Wert wurde bereits von Python berechnet und ist 100% korrekt. NUTZE IHN DIREKT.
+3. FORMAT: Beginne mit der Hauptantwort (Gesamtbetrag), dann Details
+4. WÄHRUNG: Formatiere als X.XXX,XX€ (z.B. 11.456,97€)
+5. SEI SPEZIFISCH: Nenne immer die genaue Anzahl und Beträge
 
-ANTWORT-FORMAT:
-"Basierend auf den Berechnungen beträgt der Gesamtbetrag [ZAHL AUS Gesamtbetrag/Total]€. Dies umfasst [ANZAHL] Quittungen."
+BEISPIEL-ANTWORTEN:
+- "Die Gesamtausgaben betragen 11.456,97€ aus 50 Quittungen."
+- "Ich habe 6 Quittungen von Saturn gefunden mit einem Gesamtbetrag von 1.694,20€."
+- "Die Ausgaben für Elektronik belaufen sich auf 2.340,00€ aus 8 Quittungen."
 
-WICHTIG: Nutze die Zahl aus "Gesamtbetrag/Total:" - NICHT selbst rechnen!
+Wenn du "Gesamtbetrag/Total: 1234.56€" in den Berechnungen siehst, sollte deine Antwort "1.234,56€" enthalten - nicht selbst rechnen!
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -333,8 +336,11 @@ WICHTIG: Nutze die Zahl aus "Gesamtbetrag/Total:" - NICHT selbst rechnen!
             model=OLLAMA_CHAT_MODEL,
             messages=messages,
             options={
-                "temperature": 0.3,  # Niedrigere Temperatur für präzisere Antworten
-                "num_predict": 800   # Mehr Tokens für vollständige Antworten
+                "temperature": 0.1,      # Sehr niedrig für konsistente, präzise Antworten
+                "num_predict": 1200,     # Mehr Tokens für vollständige Antworten
+                "top_p": 0.9,            # Nucleus sampling für bessere Qualität
+                "repeat_penalty": 1.1,   # Verhindert Wiederholungen
+                "num_ctx": 4096,         # Größerer Context-Window
             }
         )
         
