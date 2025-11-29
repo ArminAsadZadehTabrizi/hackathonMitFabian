@@ -276,6 +276,66 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 
+@app.post("/api/chat/query")
+async def chat_query(request: dict):
+    """
+    Chat-Query Endpoint für Frontend.
+    
+    Erwartet: {"query": "Frage"}
+    Returns: {"answer": "...", "receipts": [...], "receiptIds": [...], "totalAmount": ..., "count": ...}
+    """
+    try:
+        query = request.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        # Relevante Quittungen suchen
+        receipts_data = search_receipts(query, n_results=100)
+        context = get_context_for_query(query)
+        
+        # Präzise Berechnungen
+        calculations = calculate_precise_answer(query, receipts_data)
+        
+        # LLM-Antwort generieren
+        response_text = await generate_chat_response(
+            question=query,
+            context=context,
+            history=[],
+            calculations=calculations
+        )
+        
+        # Receipt IDs extrahieren
+        receipt_ids = [r["id"] for r in receipts_data[:10]]
+        
+        # Total Amount berechnen (falls in calculations)
+        total_amount = 0.0
+        if calculations:
+            for key, value in calculations.items():
+                if isinstance(value, dict) and "total" in value:
+                    total_amount += value["total"]
+        
+        # Receipt-Objekte für Response (vereinfacht)
+        receipts_list = []
+        for r in receipts_data[:10]:
+            receipts_list.append({
+                "id": r["id"],
+                "vendor": r["metadata"].get("vendor_name", "Unknown"),
+                "date": r["metadata"].get("date", ""),
+                "total": r["metadata"].get("total", 0),
+                "category": r["metadata"].get("category", "Sonstiges")
+            })
+        
+        return {
+            "answer": response_text,
+            "receipts": receipts_list,
+            "receiptIds": receipt_ids,
+            "totalAmount": round(total_amount, 2),
+            "count": len(receipts_list)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat query failed: {str(e)}")
+
+
 @app.get("/api/search")
 async def search(query: str, limit: int = 10, category: str = None):
     """
@@ -402,11 +462,187 @@ def get_monthly_analytics(session: SessionDep):
     }
 
 
+@app.get("/api/analytics/summary")
+def get_analytics_summary(session: SessionDep):
+    """
+    Analytics-Zusammenfassung für Dashboard.
+    
+    Returns:
+        summary, monthly, categories, vendors
+    """
+    # Gesamtstatistik
+    total_receipts = session.exec(select(func.count(ReceiptDB.id))).one()
+    total_spending = session.exec(select(func.sum(ReceiptDB.total_amount))).one() or 0.0
+    total_vat = session.exec(select(func.sum(ReceiptDB.tax_amount))).one() or 0.0
+    avg_receipt = total_spending / total_receipts if total_receipts > 0 else 0.0
+    
+    # Monatliche Daten
+    monthly_statement = (
+        select(
+            func.strftime("%Y-%m", ReceiptDB.date).label("month"),
+            func.sum(ReceiptDB.total_amount).label("amount"),
+            func.count(ReceiptDB.id).label("count")
+        )
+        .group_by(func.strftime("%Y-%m", ReceiptDB.date))
+        .order_by(func.strftime("%Y-%m", ReceiptDB.date))
+    )
+    monthly_results = session.exec(monthly_statement).all()
+    
+    # Kategorien
+    categories_statement = (
+        select(
+            ReceiptDB.category,
+            func.sum(ReceiptDB.total_amount).label("amount"),
+            func.count(ReceiptDB.id).label("count")
+        )
+        .where(ReceiptDB.category.is_not(None))
+        .group_by(ReceiptDB.category)
+        .order_by(func.sum(ReceiptDB.total_amount).desc())
+    )
+    categories_results = session.exec(categories_statement).all()
+    
+    # Vendors
+    vendors_statement = (
+        select(
+            ReceiptDB.vendor_name,
+            func.sum(ReceiptDB.total_amount).label("amount"),
+            func.count(ReceiptDB.id).label("count")
+        )
+        .group_by(ReceiptDB.vendor_name)
+        .order_by(func.sum(ReceiptDB.total_amount).desc())
+        .limit(10)
+    )
+    vendors_results = session.exec(vendors_statement).all()
+    
+    return {
+        "summary": {
+            "totalSpending": round(float(total_spending), 2),
+            "totalReceipts": total_receipts,
+            "totalVAT": round(float(total_vat), 2),
+            "avgReceiptValue": round(float(avg_receipt), 2)
+        },
+        "monthly": [
+            {
+                "month": month,
+                "amount": round(float(amount), 2),
+                "count": count
+            }
+            for month, amount, count in monthly_results
+        ],
+        "categories": [
+            {
+                "category": category,
+                "amount": round(float(amount), 2),
+                "count": count
+            }
+            for category, amount, count in categories_results
+        ],
+        "vendors": [
+            {
+                "vendor": vendor,
+                "amount": round(float(amount), 2),
+                "count": count
+            }
+            for vendor, amount, count in vendors_results
+        ]
+    }
+
+
+@app.get("/api/analytics/vendors")
+def get_vendor_analytics(session: SessionDep):
+    """
+    Vendor-Statistiken.
+    
+    Returns:
+        Liste der Top Vendors mit Beträgen und Anzahl
+    """
+    statement = (
+        select(
+            ReceiptDB.vendor_name,
+            func.sum(ReceiptDB.total_amount).label("amount"),
+            func.count(ReceiptDB.id).label("count")
+        )
+        .group_by(ReceiptDB.vendor_name)
+        .order_by(func.sum(ReceiptDB.total_amount).desc())
+    )
+    
+    results = session.exec(statement).all()
+    
+    return {
+        "vendors": [
+            {
+                "vendor": vendor,
+                "amount": round(float(amount), 2),
+                "count": count
+            }
+            for vendor, amount, count in results
+        ]
+    }
+
+
 # ============== DATABASE RECEIPTS (von Partner 2) ==============
 
 @app.get("/api/receipts")
-def get_receipts(session: SessionDep):
-    """Holt alle Quittungen mit ihren Audit-Flags."""
+def get_receipts(session: SessionDep, receiptId: str = None):
+    """
+    Holt alle Quittungen oder eine einzelne Quittung.
+    
+    Args:
+        receiptId: Optional - ID einer spezifischen Quittung
+    """
+    if receiptId:
+        # Einzelne Quittung
+        receipt = session.get(ReceiptDB, int(receiptId))
+        if not receipt:
+            raise HTTPException(status_code=404, detail="Receipt not found")
+        
+        # Line Items laden
+        line_items = session.exec(
+            select(LineItemDB).where(LineItemDB.receipt_id == receipt.id)
+        ).all()
+        
+        # Format für Frontend
+        return {
+            "receipt": {
+                "id": str(receipt.id),
+                "receiptNumber": f"RCP-{receipt.id:04d}",
+                "vendor": receipt.vendor_name,
+                "vendorVAT": None,
+                "date": receipt.date.isoformat() if receipt.date else None,
+                "total": receipt.total_amount,
+                "subtotal": receipt.total_amount - receipt.tax_amount,
+                "vat": receipt.tax_amount,
+                "vatRate": None,
+                "paymentMethod": None,
+                "category": receipt.category or "Sonstiges",
+                "currency": receipt.currency,
+                "lineItems": [
+                    {
+                        "id": str(item.id),
+                        "description": item.description,
+                        "quantity": 1,
+                        "unitPrice": item.amount,
+                        "total": item.amount,
+                        "vat": 0
+                    }
+                    for item in line_items
+                ],
+                "imageUrl": None,
+                "status": "duplicate" if receipt.flag_duplicate else ("flagged" if any([receipt.flag_suspicious, receipt.flag_missing_vat, receipt.flag_math_error]) else "verified"),
+                "tags": [],
+                "notes": None,
+                "createdAt": receipt.date.isoformat() if receipt.date else None,
+                "updatedAt": receipt.date.isoformat() if receipt.date else None,
+                "auditFlags": {
+                    "isDuplicate": receipt.flag_duplicate,
+                    "hasTotalMismatch": receipt.flag_math_error,
+                    "missingVAT": receipt.flag_missing_vat,
+                    "suspiciousCategory": "Alkohol" if receipt.flag_suspicious else None
+                }
+            }
+        }
+    
+    # Alle Quittungen
     statement = select(ReceiptDB)
     receipts = session.exec(statement).all()
     return {
@@ -418,23 +654,68 @@ def get_receipts(session: SessionDep):
 @app.get("/api/audit")
 def get_audit_receipts(session: SessionDep):
     """
-    Holt alle Quittungen, die mindestens ein Audit-Flag gesetzt haben.
-    
-    Nützlich für die Anzeige geflaggter Quittungen auf der Audit-Seite.
+    Audit-Findings im Frontend-Format.
     
     Returns:
-        Liste der Quittungen mit mindestens einem gesetzten Audit-Flag
+        duplicates, mismatches, missingVAT, suspicious, summary
     """
-    statement = select(ReceiptDB).where(
-        (ReceiptDB.flag_duplicate == True) |
-        (ReceiptDB.flag_suspicious == True) |
-        (ReceiptDB.flag_missing_vat == True) |
-        (ReceiptDB.flag_math_error == True)
-    )
-    flagged_receipts = session.exec(statement).all()
+    # Duplikate
+    duplicates = session.exec(
+        select(ReceiptDB).where(ReceiptDB.flag_duplicate == True)
+    ).all()
+    
+    # Rechenfehler
+    mismatches = session.exec(
+        select(ReceiptDB).where(ReceiptDB.flag_math_error == True)
+    ).all()
+    
+    # Fehlende MwSt
+    missing_vat = session.exec(
+        select(ReceiptDB).where(ReceiptDB.flag_missing_vat == True)
+    ).all()
+    
+    # Verdächtige
+    suspicious = session.exec(
+        select(ReceiptDB).where(ReceiptDB.flag_suspicious == True)
+    ).all()
+    
+    def format_finding(receipt: ReceiptDB) -> dict:
+        """Formatiert Receipt für Audit-Finding."""
+        # Line Items für Total-Berechnung
+        line_items = session.exec(
+            select(LineItemDB).where(LineItemDB.receipt_id == receipt.id)
+        ).all()
+        items_sum = sum(item.amount for item in line_items)
+        
+        return {
+            "receiptId": str(receipt.id),
+            "receiptNumber": f"RCP-{receipt.id:04d}",
+            "vendor": receipt.vendor_name,
+            "date": receipt.date.isoformat() if receipt.date else None,
+            "total": receipt.total_amount,
+            "expectedTotal": items_sum if receipt.flag_math_error else None,
+            "actualTotal": receipt.total_amount if receipt.flag_math_error else None,
+            "difference": abs(items_sum - receipt.total_amount) if receipt.flag_math_error else None,
+            "category": receipt.category or "Sonstiges",
+            "issue": (
+                "Duplicate receipt" if receipt.flag_duplicate else
+                "Math error" if receipt.flag_math_error else
+                "Missing VAT" if receipt.flag_missing_vat else
+                "Suspicious category" if receipt.flag_suspicious else None
+            )
+        }
+    
     return {
-        "count": len(flagged_receipts),
-        "flagged_receipts": flagged_receipts
+        "duplicates": [format_finding(r) for r in duplicates],
+        "mismatches": [format_finding(r) for r in mismatches],
+        "missingVAT": [format_finding(r) for r in missing_vat],
+        "suspicious": [format_finding(r) for r in suspicious],
+        "summary": {
+            "totalDuplicates": len(duplicates),
+            "totalMismatches": len(mismatches),
+            "totalMissingVAT": len(missing_vat),
+            "totalSuspicious": len(suspicious)
+        }
     }
 
 
