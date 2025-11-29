@@ -52,11 +52,28 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Node (falls Frontend)
+# Node / Frontend
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Frontend Build
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/build/
+frontend/.swc/
+frontend/_static/
+frontend/tsconfig.tsbuildinfo
+frontend/.vercel/
+frontend/.netlify/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
 
 # Ollama Models (zu groß für Git)
 .ollama/
