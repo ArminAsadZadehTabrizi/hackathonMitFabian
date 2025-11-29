@@ -214,13 +214,13 @@ async def generate_chat_response(
     Returns:
         str: Die generierte Antwort
     """
-    # System Prompt mit präzisen Berechnungen
+    # System Prompt with precise calculations (bilingual)
     if calculations:
         calc_text = "\n\n" + "="*60 + "\n"
-        calc_text += "⚠️  KRITISCH: PRÄZISE BERECHNUNGEN (Python - 100% korrekt!)\n"
+        calc_text += "⚠️ CRITICAL: PRECISE CALCULATIONS (Python - 100% correct!)\n"
         calc_text += "="*60 + "\n\n"
         
-        # Extrahiere die EINE relevante Zahl
+        # Extract the ONE relevant number
         main_total = None
         main_count = None
         main_filter = None
@@ -231,57 +231,84 @@ async def generate_chat_response(
                 main_count = value.get('count', 0)
                 main_filter = value.get('filter', key.replace('total_', '').replace('_', ' ').title())
                 
-                # Zeige die EINE wichtige Zahl ganz klar
-                calc_text += f"🎯 FINALE ANTWORT (nutze EXAKT diese Zahl!):\n"
-                calc_text += f"   Gesamtbetrag: {main_total}€\n"
-                calc_text += f"   Anzahl Quittungen: {main_count}\n"
+                # Show the ONE important number clearly
+                calc_text += f"🎯 FINAL ANSWER (use EXACTLY this number!):\n"
+                calc_text += f"   Gesamtbetrag/Total: {main_total}€\n"
+                calc_text += f"   Anzahl/Count: {main_count} receipts\n"
                 calc_text += f"   Filter: {main_filter}\n\n"
                 
-                # Details (falls vorhanden)
+                # Details (if available)
                 if "receipts" in value and len(value["receipts"]) > 0:
-                    calc_text += f"Details der ersten 5 Quittungen:\n"
+                    calc_text += f"Details (first 5 receipts):\n"
                     for i, item in enumerate(value["receipts"][:5], 1):
                         calc_text += f"  {i}. {item.get('vendor', 'Unknown')}: {item.get('total', 0)}€\n"
                     calc_text += "\n"
                 
-                break  # Nur die erste (wichtigste) Berechnung
+                break  # Only the first (most important) calculation
         
         calc_text += "="*60 + "\n"
-        calc_text += "⚠️  DIE ZAHL NACH 'Gesamtbetrag:' IST DIE ANTWORT!\n"
-        calc_text += "⚠️  KOPIERE SIE EXAKT - RECHNE NICHT SELBST!\n"
+        calc_text += "⚠️ THE NUMBER AFTER 'Gesamtbetrag/Total:' IS THE ANSWER!\n"
+        calc_text += "⚠️ COPY IT EXACTLY - DO NOT CALCULATE YOURSELF!\n"
         calc_text += "="*60 + "\n"
         
-        # Debug: Zeige Berechnungen
-        print(f"📊 Präzise Berechnungen für Ollama:")
+        # Debug: Show calculations
+        print(f"📊 Precise calculations for Ollama:")
         print(f"   result: {main_total}€")
     else:
         calc_text = ""
     
-    system_prompt = f"""Du bist ein professioneller Finanz-Auditor und Buchhalter-Assistent.
-Du analysierst Quittungen und beantwortest Fragen zu Ausgaben basierend auf den folgenden Daten.
+    # Detect language of question
+    is_english = any(word in question.lower() for word in ['how', 'what', 'which', 'show', 'find', 'total', 'spent', 'much', 'many', 'all', 'receipts', 'the', 'did', 'does', 'have', 'has', 'where', 'when', 'who', 'why'])
+    
+    if is_english:
+        system_prompt = f"""You are a professional financial auditor and bookkeeping assistant.
+You analyze receipts and answer questions about expenses based on the provided data.
+
+RESPOND IN ENGLISH ONLY!
+
+AVAILABLE RECEIPT DATA:
+{context}
+{calc_text}
+
+⚠️ CRITICAL RULES - FOLLOW EXACTLY:
+1. RESPOND IN ENGLISH!
+2. ⚠️ ABSOLUTELY CRITICAL: When you see "Gesamtbetrag/Total: X€" in the calculations, that IS the final answer!
+3. ⚠️ Copy this number EXACTLY - do NOT calculate yourself! The number is already correct!
+4. ⚠️ NEVER do math yourself - always use the pre-calculated numbers!
+5. Format money amounts with € symbol (e.g., €11,456.97)
+6. Be precise and specific - mention concrete numbers and amounts
+7. If multiple receipts were found, mention the count
+8. If precise calculations are available, START your answer with the total amount
+
+RESPONSE FORMAT:
+"Based on the calculations, the total amount is €[NUMBER FROM Gesamtbetrag/Total]. This includes [COUNT] receipts."
+
+IMPORTANT: Use the number from "Gesamtbetrag/Total:" - do NOT recalculate!
+"""
+    else:
+        system_prompt = f"""Du bist ein professioneller Finanz-Auditor und Buchhalter-Assistent.
+Du analysierst Quittungen und beantwortest Fragen zu Ausgaben basierend auf den Daten.
+
+ANTWORTE NUR AUF DEUTSCH!
 
 VERFÜGBARE QUITTUNGSDATEN:
 {context}
 {calc_text}
 
-⚠️  KRITISCHE REGELN - BITTE GENAU BEFOLGEN:
-1. Antworte IMMER auf Deutsch in einem professionellen, aber freundlichen Ton
-2. ⚠️  ABSOLUT KRITISCH: Wenn du "GESAMT: X€" in den PRÄZISEN BEREICHNUNGEN siehst, ist das die FINALE ANTWORT!
-3. ⚠️  Kopiere diese Zahl EXAKT - rechne NICHT selbst nach! Die Zahl ist bereits korrekt berechnet!
-4. ⚠️  Wenn du mehrere "GESAMT:" Werte siehst, nutze den Wert der zur Frage passt
-5. ⚠️  NIE selbst rechnen - immer die berechneten Zahlen verwenden!
-6. Formatiere Geldbeträge immer mit € Symbol und Komma als Dezimaltrennzeichen (z.B. 11.456,97€)
-7. Sei präzise und konkret - nenne konkrete Zahlen und Beträge
-8. Wenn mehrere Quittungen gefunden wurden, erwähne die Anzahl
-9. Wenn präzise Berechnungen vorhanden sind, beginne deine Antwort IMMER mit der Gesamtsumme
-10. Strukturiere deine Antwort klar: zuerst die Hauptantwort, dann Details
+⚠️ KRITISCHE REGELN:
+1. ANTWORTE AUF DEUTSCH!
+2. ⚠️ ABSOLUT KRITISCH: Wenn du "Gesamtbetrag/Total: X€" siehst, ist das die FINALE ANTWORT!
+3. ⚠️ Kopiere diese Zahl EXAKT - rechne NICHT selbst! Die Zahl ist bereits korrekt!
+4. ⚠️ NIE selbst rechnen - immer die berechneten Zahlen verwenden!
+5. Formatiere Geldbeträge mit € Symbol (z.B. 11.456,97€)
+6. Sei präzise - nenne konkrete Zahlen und Beträge
+7. Wenn mehrere Quittungen gefunden wurden, erwähne die Anzahl
+8. Beginne mit der Gesamtsumme wenn Berechnungen vorhanden sind
 
-FORMAT-VORLAGE FÜR ANTWORTEN:
-- "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag [HIER EXAKT DIE ZAHL AUS GESAMT EINFÜGEN]€. Dies setzt sich zusammen aus [ANZAHL] Quittungen."
-- "Ich habe [ANZAHL] Quittungen von [VENDOR] gefunden mit einem Gesamtbetrag von [EXAKT DIE ZAHL AUS GESAMT]€."
-- "Die Ausgaben für [KATEGORIE] betragen insgesamt [EXAKT DIE ZAHL AUS GESAMT]€ aus [ANZAHL] Quittungen."
+ANTWORT-FORMAT:
+"Basierend auf den Berechnungen beträgt der Gesamtbetrag [ZAHL AUS Gesamtbetrag/Total]€. Dies umfasst [ANZAHL] Quittungen."
 
-WICHTIG: Wenn du "GESAMT: 11456.97€" siehst, dann schreibe EXAKT: "11.456,97€" (mit Punkt als Tausendertrennzeichen und Komma als Dezimaltrennzeichen).
+WICHTIG: Nutze die Zahl aus "Gesamtbetrag/Total:" - NICHT selbst rechnen!
 """
 
     messages = [{"role": "system", "content": system_prompt}]
