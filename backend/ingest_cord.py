@@ -13,7 +13,7 @@ from datasets import load_dataset
 
 # Configuration
 API_URL = "http://localhost:8000/api/ingest"
-NUM_RECEIPTS = 50
+NUM_RECEIPTS = 200  # Import more receipts to get better data
 
 
 def parse_date(date_str):
@@ -110,6 +110,8 @@ def extract_receipt_data(entry):
         
         # Extract menu items
         items = []
+        items_total = 0.0
+        
         if 'gt_parse' in gt and 'menu' in gt['gt_parse']:
             for menu_item in gt['gt_parse']['menu']:
                 description = "Unknown Item"
@@ -118,13 +120,34 @@ def extract_receipt_data(entry):
                 # Get item name
                 if 'nm' in menu_item and 'text' in menu_item['nm']:
                     description = menu_item['nm']['text']
+                elif 'name' in menu_item and 'text' in menu_item['name']:
+                    description = menu_item['name']['text']
                 
-                # Get item price
-                if 'price' in menu_item and 'price' in menu_item['price']:
-                    try:
-                        amount = float(menu_item['price']['price'])
-                    except (ValueError, TypeError):
-                        amount = 0.0
+                # Get item price - try multiple paths
+                if 'price' in menu_item:
+                    price_obj = menu_item['price']
+                    if isinstance(price_obj, dict):
+                        if 'price' in price_obj:
+                            try:
+                                amount = float(price_obj['price'])
+                            except (ValueError, TypeError):
+                                pass
+                        elif 'value' in price_obj:
+                            try:
+                                amount = float(price_obj['value'])
+                            except (ValueError, TypeError):
+                                pass
+                    elif isinstance(price_obj, (int, float)):
+                        amount = float(price_obj)
+                
+                # Also try 'cnt' (count) and 'price' separately
+                if amount == 0.0 and 'cnt' in menu_item:
+                    cnt_obj = menu_item['cnt']
+                    if isinstance(cnt_obj, dict) and 'price' in cnt_obj:
+                        try:
+                            amount = float(cnt_obj['price'])
+                        except (ValueError, TypeError):
+                            pass
                 
                 # Only add items with valid data
                 if description and amount > 0:
@@ -132,8 +155,13 @@ def extract_receipt_data(entry):
                         "description": description,
                         "amount": amount
                     })
+                    items_total += amount
         
-        # If no items found, create a dummy item with total amount
+        # If total_amount is 0 but we have items, use items total
+        if total_amount == 0.0 and items_total > 0:
+            total_amount = items_total
+        
+        # If no items found but we have a total, create a dummy item
         if not items and total_amount > 0:
             items.append({
                 "description": "Total Purchase",

@@ -129,73 +129,90 @@ export function RenderCellAuditFlags({ params }: ParamsProps) {
     return subtotal + vatAmount;
   };
 
-  if (auditFlags.isDuplicate) flags.push('Duplicate');
+  // flag_suspicious (Alkohol/Tabak) - Gelb/Warning
+  if (auditFlags.suspiciousCategory) {
+    flags.push({ type: 'suspicious', label: 'Suspicious', color: 'warning' });
+  }
+  
+  // flag_math_error (Rechnung falsch) - Rot/Error
   if (auditFlags.hasTotalMismatch) {
     const expectedTotal = calculateExpectedTotal();
     const difference = total - expectedTotal;
     flags.push({
-      type: 'Mismatch',
+      type: 'mismatch',
+      label: 'Math Error',
+      color: 'error',
       expectedTotal,
       actualTotal: total,
       difference,
     });
   }
-  if (auditFlags.missingVAT) flags.push('No VAT');
-  if (auditFlags.suspiciousCategory) flags.push('Suspicious');
+  
+  // flag_missing_vat - Rot/Error
+  if (auditFlags.missingVAT) {
+    flags.push({ type: 'missingVAT', label: 'Missing VAT', color: 'error' });
+  }
+  
+  // flag_duplicate - Gelb/Warning
+  if (auditFlags.isDuplicate) {
+    flags.push({ type: 'duplicate', label: 'Duplicate', color: 'warning' });
+  }
 
   if (flags.length === 0) return <span>-</span>;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
       {flags.map((flag, index) => {
-        if (typeof flag === 'string') {
+        // Mismatch with expandable details
+        if (flag.type === 'mismatch') {
           return (
-            <Label key={index} variant="soft" color="error" sx={{ fontSize: '0.75rem' }}>
-              {flag}
-            </Label>
+            <Box key={index} sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+              <Box
+                component="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMismatchExpanded(!mismatchExpanded);
+                }}
+                sx={{
+                  border: 'none',
+                  background: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  '&:hover': {
+                    opacity: 0.8,
+                  },
+                }}
+              >
+                <Label variant="soft" color={flag.color as any} sx={{ fontSize: '0.75rem' }}>
+                  {flag.label}
+                </Label>
+                <Iconify
+                  icon={mismatchExpanded ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold'}
+                  width={14}
+                  sx={{ color: `${flag.color}.main` }}
+                />
+              </Box>
+              {mismatchExpanded && (
+                <Box sx={{ pl: 1, fontSize: '0.7rem', color: `${flag.color}.main`, mt: 0.5 }}>
+                  <Box>Expected: {fCurrency(flag.expectedTotal)}</Box>
+                  <Box>Actual: {fCurrency(flag.actualTotal)}</Box>
+                  <Box sx={{ fontWeight: 600 }}>
+                    Diff: {fCurrency(Math.abs(flag.difference))} {flag.difference > 0 ? '↑' : '↓'}
+                  </Box>
+                </Box>
+              )}
+            </Box>
           );
         }
-        // Mismatch with expandable details
+        
+        // Other flags (suspicious, missingVAT, duplicate)
         return (
-          <Box key={index} sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-            <Box
-              component="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMismatchExpanded(!mismatchExpanded);
-              }}
-              sx={{
-                border: 'none',
-                background: 'none',
-                padding: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.5,
-                '&:hover': {
-                  opacity: 0.8,
-                },
-              }}
-            >
-              <Label variant="soft" color="error" sx={{ fontSize: '0.75rem' }}>
-                Mismatch
-              </Label>
-              <Iconify
-                icon={mismatchExpanded ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold'}
-                width={14}
-                sx={{ color: 'error.main' }}
-              />
-            </Box>
-            {mismatchExpanded && (
-              <Box sx={{ pl: 1, fontSize: '0.7rem', color: 'error.main', mt: 0.5 }}>
-                <Box>Expected: {fCurrency(flag.expectedTotal)}</Box>
-                <Box>Actual: {fCurrency(flag.actualTotal)}</Box>
-                <Box sx={{ fontWeight: 600 }}>
-                  Diff: {fCurrency(Math.abs(flag.difference))} {flag.difference > 0 ? '↑' : '↓'}
-                </Box>
-              </Box>
-            )}
-          </Box>
+          <Label key={index} variant="soft" color={flag.color as any} sx={{ fontSize: '0.75rem' }}>
+            {flag.label}
+          </Label>
         );
       })}
     </Box>

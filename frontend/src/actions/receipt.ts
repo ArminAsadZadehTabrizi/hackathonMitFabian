@@ -129,6 +129,64 @@ export function useGetAudit() {
 
 // ----------------------------------------------------------------------
 
+type MonthlyAnalyticsData = {
+  monthly_totals: Array<{
+    month: string;
+    total: number;
+  }>;
+};
+
+export function useGetMonthlyAnalytics() {
+  const url = endpoints.analytics.monthly;
+
+  const { data, isLoading, error, isValidating } = useSWR<MonthlyAnalyticsData>(url, fetcher, {
+    ...swrOptions,
+  });
+
+  const memoizedValue = useMemo(
+    () => ({
+      monthly: data?.monthly_totals || [],
+      monthlyLoading: isLoading,
+      monthlyError: error,
+      monthlyValidating: isValidating,
+    }),
+    [data?.monthly_totals, error, isLoading, isValidating]
+  );
+
+  return memoizedValue;
+}
+
+// ----------------------------------------------------------------------
+
+type CategoryAnalyticsData = {
+  category_totals: Array<{
+    category: string;
+    total: number;
+  }>;
+};
+
+export function useGetCategoryAnalytics() {
+  const url = endpoints.analytics.category;
+
+  const { data, isLoading, error, isValidating } = useSWR<CategoryAnalyticsData>(url, fetcher, {
+    ...swrOptions,
+  });
+
+  const memoizedValue = useMemo(
+    () => ({
+      categories: data?.category_totals || [],
+      categoryLoading: isLoading,
+      categoryError: error,
+      categoryValidating: isValidating,
+    }),
+    [data?.category_totals, error, isLoading, isValidating]
+  );
+
+  return memoizedValue;
+}
+
+// ----------------------------------------------------------------------
+
 type ChatQueryData = {
   answer: string;
   receipts: IReceiptItem[];

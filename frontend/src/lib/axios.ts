@@ -84,6 +84,8 @@ export const endpoints = {
   receipts: '/api/receipts',
   analytics: {
     summary: '/api/analytics/summary',
+    monthly: '/api/analytics/monthly',
+    category: '/api/analytics/category',
     vendors: '/api/analytics/vendors',
   },
   audit: '/api/audit',
