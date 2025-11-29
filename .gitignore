@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+
+# AI Backend
+ai-backend/venv/
+ai-backend/__pycache__/
+ai-backend/*.pyc
+ai-backend/chroma_db/
+ai-backend/data/
+ai-backend/server.log
+ai-backend/.env
+ai-backend/.env.local
+
+# ChromaDB
+chroma_db/
+*.db
+*.sqlite
+
+# Data
+data/
+*.csv
+*.json
+!package.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (falls Frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ollama Models (zu groß für Git)
+.ollama/
+
