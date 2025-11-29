@@ -10,6 +10,7 @@ from pathlib import Path
 
 from config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
 from models.receipt import Receipt, LineItem
+from services.receipt_validator import validate_receipt, fix_receipt
 
 
 # Ollama Client initialisieren
@@ -17,36 +18,44 @@ client = ollama.Client(host=OLLAMA_HOST)
 
 
 EXTRACTION_PROMPT = """Du bist ein Experte für das Auslesen von Quittungen und Rechnungen.
-Analysiere dieses Bild einer Quittung und extrahiere ALLE Informationen.
+Analysiere dieses Bild einer Quittung sehr sorgfältig und extrahiere ALLE sichtbaren Informationen.
 
-Antworte NUR mit einem JSON-Objekt in diesem Format (keine andere Text!):
+Antworte NUR mit einem gültigen JSON-Objekt in diesem EXAKTEN Format (keine anderen Texte, keine Erklärungen!):
 {
-    "vendor_name": "Name des Geschäfts",
-    "vendor_address": "Adresse falls sichtbar",
-    "date": "YYYY-MM-DD Format",
+    "vendor_name": "Name des Geschäfts oder Restaurants",
+    "vendor_address": "Vollständige Adresse falls sichtbar, sonst null",
+    "date": "YYYY-MM-DD Format (z.B. 2024-01-15)",
     "total": 123.45,
     "subtotal": 100.00,
     "tax": 23.45,
     "tax_rate": 19.0,
     "currency": "EUR",
-    "payment_method": "Karte/Bar/etc",
+    "payment_method": "Karte/Bar/Kreditkarte/etc oder null",
     "line_items": [
         {
-            "description": "Produktname",
-            "quantity": 1,
-            "unit_price": 10.00,
+            "description": "Vollständiger Produktname wie auf der Quittung",
+            "quantity": 2,
+            "unit_price": 5.00,
             "total_price": 10.00,
-            "category": "Lebensmittel/Getränke/Büro/etc"
+            "category": "Lebensmittel/Getränke/Alkohol/Essen/Bürobedarf/Elektronik/Möbel/Kraftstoff/Sonstiges"
         }
     ],
-    "category": "Restaurant/Supermarkt/Tankstelle/etc"
+    "category": "Restaurant/Supermarkt/Tankstelle/Café/Bürobedarf/Elektronik/Möbel/Online Shopping/Sonstiges"
 }
 
-WICHTIG:
-- Alle Zahlen als Dezimalzahlen (nicht als String)
-- Datum im ISO-Format YYYY-MM-DD
-- Falls etwas nicht lesbar ist, setze null
-- Versuche JEDE Position einzeln aufzulisten
+KRITISCHE REGELN:
+1. Alle Zahlen müssen als DEZIMALZAHLEN sein (nicht als String, z.B. 12.50 nicht "12,50")
+2. Datum MUSS im ISO-Format YYYY-MM-DD sein (z.B. 2024-01-15)
+3. quantity ist die ANZAHL der gekauften Einheiten (z.B. 2 Flaschen = quantity: 2)
+4. total_price ist der GESAMTPREIS für diese quantity (z.B. 2 Flaschen à 5€ = total_price: 10.00)
+5. unit_price ist der EINZELPREIS pro Einheit (z.B. 5.00)
+6. Versuche JEDE einzelne Position aufzulisten - nicht zusammenfassen!
+7. Falls etwas nicht lesbar ist, setze null (nicht 0 oder leerer String)
+8. Kategorien müssen aus der Liste sein: Lebensmittel, Getränke, Alkohol, Essen, Bürobedarf, Elektronik, Möbel, Kraftstoff, Sonstiges
+9. Prüfe dass total = Summe aller line_items.total_price (wenn subtotal vorhanden)
+10. JSON muss gültig sein - keine Kommentare, keine Trailing Commas!
+
+WICHTIG: Antworte NUR mit dem JSON-Objekt, keine zusätzlichen Texte davor oder danach!
 """
 
 
@@ -73,45 +82,88 @@ async def extract_receipt_from_image(
     else:
         raise ValueError("Entweder image_path oder image_base64 muss angegeben werden")
     
-    # Ollama Vision Model aufrufen
-    response = client.chat(
-        model=OLLAMA_MODEL,
-        messages=[
-            {
-                "role": "user",
-                "content": EXTRACTION_PROMPT,
-                "images": [image_data]
-            }
-        ]
-    )
+    # Ollama Vision Model aufrufen (mit Retry-Logik)
+    max_retries = 3
+    data = None
+    response_text = None
     
-    # Response parsen
-    response_text = response["message"]["content"]
+    for attempt in range(max_retries):
+        try:
+            response = client.chat(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": EXTRACTION_PROMPT,
+                        "images": [image_data]
+                    }
+                ],
+                options={
+                    "temperature": 0.1,  # Niedrige Temperatur für präzisere Ergebnisse
+                    "num_predict": 2000  # Genug Tokens für vollständige Antwort
+                }
+            )
+            
+            # Response parsen
+            response_text = response["message"]["content"]
+            
+            # JSON aus Response extrahieren (verschiedene Formate)
+            json_str = None
+            
+            # Versuche 1: Markdown Code Block
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Versuche 2: Code Block ohne "json"
+                json_match = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    # Versuche 3: Direktes JSON (finde erste { bis letzte })
+                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                    else:
+                        json_str = response_text
+            
+            # Bereinige JSON-String
+            json_str = json_str.strip()
+            # Entferne mögliche Kommentare
+            json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
+            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+            
+            data = json.loads(json_str)
+            break  # Erfolgreich geparst
+            
+        except json.JSONDecodeError as e:
+            if attempt < max_retries - 1:
+                print(f"⚠️  JSON Parse Fehler (Versuch {attempt + 1}/{max_retries}): {e}")
+                print(f"   Versuche erneut...")
+                continue
+            else:
+                print(f"❌ JSON Parse Fehler nach {max_retries} Versuchen: {e}")
+                print(f"   Response war: {response_text[:500]}...")
+                raise
     
-    # JSON aus Response extrahieren (manchmal mit Markdown Code Blocks)
-    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        # Versuche direkt als JSON zu parsen
-        json_str = response_text
+    if data is None:
+        raise ValueError("Konnte JSON nicht parsen nach mehreren Versuchen")
     
     try:
-        data = json.loads(json_str)
         
         # LineItems konvertieren
         line_items = []
         for item in data.get("line_items", []):
             line_items.append(LineItem(**item))
         
-        return Receipt(
+        receipt = Receipt(
             vendor_name=data.get("vendor_name", "Unbekannt"),
             vendor_address=data.get("vendor_address"),
             date=data.get("date"),
-            total=float(data.get("total", 0)),
-            subtotal=data.get("subtotal"),
-            tax=data.get("tax"),
-            tax_rate=data.get("tax_rate"),
+            total=float(data.get("total", 0)) if data.get("total") else None,
+            subtotal=float(data.get("subtotal")) if data.get("subtotal") else None,
+            tax=float(data.get("tax")) if data.get("tax") else None,
+            tax_rate=float(data.get("tax_rate")) if data.get("tax_rate") else None,
             currency=data.get("currency", "EUR"),
             payment_method=data.get("payment_method"),
             line_items=line_items,
@@ -119,14 +171,27 @@ async def extract_receipt_from_image(
             image_path=image_path,
             raw_text=response_text
         )
-    except json.JSONDecodeError as e:
-        print(f"JSON Parse Error: {e}")
-        print(f"Response was: {response_text}")
+        
+        # Validierung und Auto-Korrektur
+        validation = validate_receipt(receipt)
+        if validation["warnings"]:
+            print(f"⚠️  Validierungswarnungen: {len(validation['warnings'])}")
+            for warning in validation["warnings"][:3]:  # Zeige max 3 Warnungen
+                print(f"   - {warning}")
+        
+        # Auto-Fix anwenden
+        receipt = fix_receipt(receipt, apply_corrections=True)
+        
+        return receipt
+        
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        print(f"❌ Fehler beim Verarbeiten der Quittung: {e}")
+        print(f"   Response war: {response_text[:500] if response_text else 'Keine Response'}...")
         # Fallback: Leere Quittung mit raw text
         return Receipt(
             vendor_name="Parse Error",
             total=0,
-            raw_text=response_text,
+            raw_text=response_text or "Keine Response vom LLM",
             image_path=image_path
         )
 
@@ -215,9 +280,14 @@ REGELN:
     # Aktuelle Frage
     messages.append({"role": "user", "content": question})
     
+    # Chat mit optimierten Parametern
     response = client.chat(
         model=OLLAMA_CHAT_MODEL,
-        messages=messages
+        messages=messages,
+        options={
+            "temperature": 0.7,  # Kreativität für natürliche Antworten
+            "num_predict": 500   # Genug für vollständige Antworten
+        }
     )
     
     return response["message"]["content"]

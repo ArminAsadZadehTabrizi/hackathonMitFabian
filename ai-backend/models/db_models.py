@@ -43,3 +43,4 @@ class LineItemDB(SQLModel, table=True):
     # Relationship back to receipt
     receipt: Optional[ReceiptDB] = Relationship(back_populates="line_items")
 
+

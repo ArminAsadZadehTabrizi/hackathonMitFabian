@@ -196,3 +196,4 @@ Siehe `ai-backend/INTEGRATION_PARTNER2.md`, Abschnitt "🧪 Testing"
 
 Bei Fragen: Siehe Dokumentation oder melde dich! 🚀
 
+

@@ -25,7 +25,8 @@ collection = None
 # Fallback: In-Memory Storage
 _memory_storage: List[Tuple[str, str, Dict]] = []  # [(id, document, metadata), ...]
 _receipt_objects: Dict[str, Receipt] = {}  # {id: Receipt} - Original Receipt-Objekte für präzise Berechnungen
-_receipt_objects: Dict[str, Receipt] = {}  # {id: Receipt} - Original Receipt-Objekte für präzise Berechnungen
+# Caching für Embeddings (Performance-Optimierung)
+_embedding_cache: Dict[str, List[float]] = {}  # {text: embedding}
 
 
 def init_rag():
@@ -96,8 +97,8 @@ def add_receipt_to_rag(receipt: Receipt, receipt_id: str):
     }
     
     if collection is not None:
-        # Zu ChromaDB hinzufügen
-        embedding = embedding_model.encode(document).tolist()
+        # Zu ChromaDB hinzufügen (mit Cache)
+        embedding = _get_embedding(document)
         collection.upsert(
             ids=[receipt_id],
             embeddings=[embedding],
@@ -137,7 +138,7 @@ def add_receipts_batch(receipts: List[tuple]):
             doc = receipt_to_document(receipt)
             ids.append(receipt_id)
             documents.append(doc)
-            embeddings.append(embedding_model.encode(doc).tolist())
+            embeddings.append(_get_embedding(doc))
             metadatas.append({
                 "vendor_name": receipt.vendor_name,
                 "date": receipt.date or "",
@@ -179,6 +180,29 @@ def get_receipt_objects_by_ids(receipt_ids: List[str]) -> List[Receipt]:
     return [_receipt_objects.get(rid) for rid in receipt_ids if rid in _receipt_objects]
 
 
+def _get_embedding(text: str) -> List[float]:
+    """
+    Holt Embedding mit Caching für bessere Performance.
+    """
+    global _embedding_cache
+    
+    # Prüfe Cache
+    if text in _embedding_cache:
+        return _embedding_cache[text]
+    
+    # Berechne Embedding
+    if embedding_model is None:
+        init_rag()
+    
+    embedding = embedding_model.encode(text).tolist()
+    
+    # Cache speichern (max 1000 Einträge)
+    if len(_embedding_cache) < 1000:
+        _embedding_cache[text] = embedding
+    
+    return embedding
+
+
 def search_receipts(
     query: str,
     n_results: int = 5,
@@ -198,8 +222,10 @@ def search_receipts(
     if embedding_model is None:
         init_rag()
     
-    # Query embedding berechnen
-    query_embedding = embedding_model.encode(query)
+    # Query embedding berechnen (mit Cache)
+    query_embedding_array = _get_embedding(query)
+    import numpy as np
+    query_embedding = np.array(query_embedding_array)
     
     if collection is not None:
         # ChromaDB verwenden
@@ -234,8 +260,8 @@ def search_receipts(
             if category_filter and metadata.get("category") != category_filter:
                 continue
             
-            # Embedding berechnen
-            doc_embedding = embedding_model.encode(document)
+            # Embedding berechnen (mit Cache)
+            doc_embedding = _get_embedding(document)
             
             # Cosine Similarity
             similarity = np.dot(query_embedding, doc_embedding) / (norm(query_embedding) * norm(doc_embedding))

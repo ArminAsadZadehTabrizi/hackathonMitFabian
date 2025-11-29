@@ -58,3 +58,4 @@ def run_audit(receipt: ReceiptDB, items: list[LineItemDB], db: Session) -> Recei
     
     return receipt
 
+
