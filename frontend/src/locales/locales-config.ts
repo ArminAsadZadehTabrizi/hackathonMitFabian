@@ -9,6 +9,7 @@ import {
   viVN as viVNCore,
   zhCN as zhCNCore,
   arSA as arSACore,
+  deDE as deDECore,
 } from '@mui/material/locale';
 // MUI Date Pickers Locales
 import {
@@ -16,6 +17,7 @@ import {
   frFR as frFRDate,
   viVN as viVNDate,
   zhCN as zhCNDate,
+  deDE as deDEDate,
 } from '@mui/x-date-pickers/locales';
 // MUI Data Grid Locales
 import {
@@ -24,12 +26,13 @@ import {
   viVN as viVNDataGrid,
   zhCN as zhCNDataGrid,
   arSD as arSDDataGrid,
+  deDE as deDEDataGrid,
 } from '@mui/x-data-grid/locales';
 
 // ----------------------------------------------------------------------
 
 // Supported languages
-export const supportedLngs = ['en', 'fr', 'vi', 'cn', 'ar'] as const;
+export const supportedLngs = ['en', 'de', 'fr', 'vi', 'cn', 'ar'] as const;
 export type LangCode = (typeof supportedLngs)[number];
 
 // Fallback and default namespace
@@ -68,6 +71,16 @@ export const allLangs: LangOption[] = [
     numberFormat: { code: 'en-US', currency: 'USD' },
     systemValue: {
       components: { ...enUSDate.components, ...enUSDataGrid.components },
+    },
+  },
+  {
+    value: 'de',
+    label: 'Deutsch',
+    countryCode: 'DE',
+    adapterLocale: 'de',
+    numberFormat: { code: 'de-DE', currency: 'EUR' },
+    systemValue: {
+      components: { ...deDECore.components, ...deDEDate.components, ...deDEDataGrid.components },
     },
   },
   {

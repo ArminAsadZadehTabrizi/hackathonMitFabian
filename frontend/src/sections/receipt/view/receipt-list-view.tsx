@@ -10,6 +10,7 @@ import type { IReceiptItem, IReceiptTableFilters } from 'src/types/receipt';
 import { useBoolean, useSetState } from 'minimal-shared/hooks';
 import { useMemo, useState, useEffect, useCallback } from 'react';
 
+import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import Button from '@mui/material/Button';
 import { useTheme } from '@mui/material/styles';
@@ -29,6 +30,7 @@ import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
 import { useToolbarSettings, CustomGridActionsCellItem } from 'src/components/custom-data-grid';
 
 import { ReceiptTableToolbar } from '../receipt-table-toolbar';
+import { ReceiptUploadZone } from '../components/receipt-upload-zone';
 import {
   RenderCellTotal,
   RenderCellStatus,
@@ -169,6 +171,16 @@ export function ReceiptListView() {
           }
           sx={{ mb: { xs: 3, md: 5 } }}
         />
+
+        <Box sx={{ mb: 3 }}>
+          <ReceiptUploadZone
+            onUpload={async (files) => {
+              // Simulate upload - replace with actual API call
+              console.log('Uploading files:', files);
+              toast.success(`Uploading ${files.length} file(s)...`);
+            }}
+          />
+        </Box>
 
         <Card
           sx={{

@@ -29,8 +29,14 @@ const axiosInstance = axios.create({
 axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
+    const statusCode = error?.response?.status;
     const message = error?.response?.data?.message || error?.message || 'Something went wrong!';
-    console.error('Axios error:', message);
+    
+    // Suppress console errors for 404s (backend not available)
+    if (statusCode !== 404) {
+      console.error('Axios error:', message);
+    }
+    
     return Promise.reject(new Error(message));
   }
 );
@@ -48,8 +54,12 @@ export const fetcher = async <T = unknown>(
     const res = await axiosInstance.get<T>(url, config);
 
     return res.data;
-  } catch (error) {
-    console.error('Fetcher failed:', error);
+  } catch (error: any) {
+    // Suppress console errors for 404s (backend not available)
+    const statusCode = error?.response?.status;
+    if (statusCode !== 404) {
+      console.error('Fetcher failed:', error);
+    }
     throw error;
   }
 };

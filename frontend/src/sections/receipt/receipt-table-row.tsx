@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
+import Chip from '@mui/material/Chip';
 import Avatar from '@mui/material/Avatar';
 import ListItemText from '@mui/material/ListItemText';
 
@@ -28,15 +29,30 @@ export function RenderCellTotal({ params }: ParamsProps) {
 export function RenderCellStatus({ params }: ParamsProps) {
   const { status } = params.row;
   
-  const color =
-    status === 'verified' ? 'success' :
-    status === 'duplicate' ? 'warning' :
-    'error';
+  // Determine chip color based on status
+  let color: 'success' | 'warning' | 'error' | 'default' = 'default';
+  let label = status;
+  
+  if (status === 'verified' || status === 'OK') {
+    color = 'success';
+    label = status === 'OK' ? 'OK' : 'Verified';
+  } else if (status === 'duplicate' || status === 'Missing VAT' || status === 'missingVAT') {
+    color = 'warning';
+    label = status === 'missingVAT' ? 'Missing VAT' : status;
+  } else if (status === 'Suspicious Category' || status === 'suspicious') {
+    color = 'error';
+    label = status === 'suspicious' ? 'Suspicious' : 'Suspicious Category';
+  } else if (status === 'duplicate') {
+    color = 'error';
+  }
 
   return (
-    <Label variant="soft" color={color}>
-      {status}
-    </Label>
+    <Chip 
+      label={label} 
+      color={color} 
+      size="small"
+      variant="filled"
+    />
   );
 }
 
@@ -186,9 +202,13 @@ export function RenderCellAuditFlags({ params }: ParamsProps) {
                   },
                 }}
               >
-                <Label variant="soft" color={flag.color as any} sx={{ fontSize: '0.75rem' }}>
-                  {flag.label}
-                </Label>
+                <Chip 
+                  label={flag.label} 
+                  color={flag.color as 'warning' | 'error'} 
+                  size="small"
+                  variant="filled"
+                  sx={{ fontSize: '0.75rem', height: '20px' }}
+                />
                 <Iconify
                   icon={mismatchExpanded ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold'}
                   width={14}
@@ -210,9 +230,14 @@ export function RenderCellAuditFlags({ params }: ParamsProps) {
         
         // Other flags (suspicious, missingVAT, duplicate)
         return (
-          <Label key={index} variant="soft" color={flag.color as any} sx={{ fontSize: '0.75rem' }}>
-            {flag.label}
-          </Label>
+          <Chip 
+            key={index}
+            label={flag.label} 
+            color={flag.color as 'warning' | 'error'} 
+            size="small"
+            variant="filled"
+            sx={{ fontSize: '0.75rem', height: '20px' }}
+          />
         );
       })}
     </Box>

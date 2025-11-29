@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -10,6 +10,7 @@ import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
 
 import { paths } from 'src/routes/paths';
 import { RouterLink } from 'src/routes/components';
@@ -34,6 +35,21 @@ type Props = {
 export function ReceiptDetailsView({ id }: Props) {
   const { receipt, receiptLoading } = useGetReceipt(id);
   const [mismatchExpanded, setMismatchExpanded] = useState(false);
+  const [editedReceipt, setEditedReceipt] = useState<any>(null);
+
+  // Initialize edited receipt when receipt loads
+  useEffect(() => {
+    if (receipt) {
+      setEditedReceipt({
+        vendor: receipt.vendor,
+        date: receipt.date,
+        total: receipt.total,
+        vat: receipt.vat,
+        category: receipt.category,
+        paymentMethod: receipt.paymentMethod,
+      });
+    }
+  }, [receipt]);
 
   const hasIssues = useMemo(() => {
     if (!receipt) return false;
@@ -89,7 +105,73 @@ export function ReceiptDetailsView({ id }: Props) {
         />
 
         <Grid container spacing={3}>
-          <Grid size={{ xs: 12, md: 8 }}>
+          {/* Left: Receipt Image (50%) */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Card sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Typography variant="h6" gutterBottom>
+                Receipt Image
+              </Typography>
+              <Divider sx={{ my: 2 }} />
+              <Box
+                sx={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 400,
+                  bgcolor: 'background.neutral',
+                  borderRadius: 1,
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                {receipt.imageUrl ? (
+                  <Box
+                    component="img"
+                    src={receipt.imageUrl}
+                    alt={receipt.receiptNumber}
+                    sx={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      cursor: 'zoom-in',
+                    }}
+                    onClick={() => {
+                      // Simple zoom - could be enhanced with a modal
+                      const img = document.createElement('img');
+                      img.src = receipt.imageUrl!;
+                      img.style.position = 'fixed';
+                      img.style.top = '50%';
+                      img.style.left = '50%';
+                      img.style.transform = 'translate(-50%, -50%)';
+                      img.style.maxWidth = '90vw';
+                      img.style.maxHeight = '90vh';
+                      img.style.zIndex = 9999;
+                      img.style.cursor = 'zoom-out';
+                      img.onclick = () => document.body.removeChild(img);
+                      document.body.appendChild(img);
+                    }}
+                  />
+                ) : (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                      color: 'text.secondary',
+                    }}
+                  >
+                    <Iconify icon="solar:document-add-bold-duotone" width={64} />
+                    <Typography variant="body2">No image available</Typography>
+                  </Box>
+                )}
+              </Box>
+            </Card>
+          </Grid>
+
+          {/* Right: Editable Form (50%) */}
+          <Grid size={{ xs: 12, md: 6 }}>
             <Card sx={{ p: 3 }}>
               <Stack spacing={3}>
                 <Box>
@@ -104,31 +186,87 @@ export function ReceiptDetailsView({ id }: Props) {
                       </Typography>
                       <Typography variant="body1">{receipt.receiptNumber}</Typography>
                     </Grid>
-                    <Grid size={{ xs: 6, sm: 4 }}>
-                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                        Vendor
-                      </Typography>
-                      <Typography variant="body1">{receipt.vendor}</Typography>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Vendor"
+                        value={editedReceipt?.vendor || receipt.vendor}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, vendor: e.target.value })
+                        }
+                        variant="outlined"
+                        size="small"
+                      />
                     </Grid>
-                    <Grid size={{ xs: 6, sm: 4 }}>
-                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                        Date
-                      </Typography>
-                      <Typography variant="body1">
-                        {fDate(receipt.date)} {fTime(receipt.date)}
-                      </Typography>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Date"
+                        type="datetime-local"
+                        value={editedReceipt?.date ? new Date(editedReceipt.date).toISOString().slice(0, 16) : new Date(receipt.date).toISOString().slice(0, 16)}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, date: new Date(e.target.value).toISOString() })
+                        }
+                        variant="outlined"
+                        size="small"
+                        InputLabelProps={{ shrink: true }}
+                      />
                     </Grid>
-                    <Grid size={{ xs: 6, sm: 4 }}>
-                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                        Category
-                      </Typography>
-                      <Label variant="soft">{receipt.category}</Label>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Category"
+                        value={editedReceipt?.category || receipt.category}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, category: e.target.value })
+                        }
+                        variant="outlined"
+                        size="small"
+                      />
                     </Grid>
-                    <Grid size={{ xs: 6, sm: 4 }}>
-                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                        Payment Method
-                      </Typography>
-                      <Typography variant="body1">{receipt.paymentMethod}</Typography>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Payment Method"
+                        value={editedReceipt?.paymentMethod || receipt.paymentMethod}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, paymentMethod: e.target.value })
+                        }
+                        variant="outlined"
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Total"
+                        type="number"
+                        value={editedReceipt?.total || receipt.total}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, total: parseFloat(e.target.value) })
+                        }
+                        variant="outlined"
+                        size="small"
+                        InputProps={{
+                          startAdornment: <Typography sx={{ mr: 1 }}>€</Typography>,
+                        }}
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="VAT"
+                        type="number"
+                        value={editedReceipt?.vat || receipt.vat || 0}
+                        onChange={(e) =>
+                          setEditedReceipt({ ...editedReceipt, vat: parseFloat(e.target.value) })
+                        }
+                        variant="outlined"
+                        size="small"
+                        InputProps={{
+                          startAdornment: <Typography sx={{ mr: 1 }}>€</Typography>,
+                        }}
+                      />
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4 }}>
                       <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -209,7 +347,10 @@ export function ReceiptDetailsView({ id }: Props) {
               </Stack>
             </Card>
           </Grid>
+        </Grid>
 
+        {/* Summary and Issues Section */}
+        <Grid container spacing={3} sx={{ mt: 0 }}>
           <Grid size={{ xs: 12, md: 4 }}>
             <Stack spacing={3}>
               <Card sx={{ p: 3 }}>
