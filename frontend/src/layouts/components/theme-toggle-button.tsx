@@ -5,19 +5,19 @@ import type { IconButtonProps } from '@mui/material/IconButton';
 import { m } from 'framer-motion';
 import { useCallback } from 'react';
 
-import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
 import { useColorScheme } from '@mui/material/styles';
 
+import { Iconify } from 'src/components/iconify';
 import { useSettingsContext } from 'src/components/settings';
 import { varTap, varHover, transitionTap } from 'src/components/animate';
-import { Iconify } from 'src/components/iconify';
 
 // ----------------------------------------------------------------------
 
 export function ThemeToggleButton({ sx, ...other }: IconButtonProps) {
   const settings = useSettingsContext();
-  const { mode, setMode } = useColorScheme();
+  const { setMode } = useColorScheme();
 
   const isDark = settings.state.mode === 'dark';
 

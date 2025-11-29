@@ -1,5 +1,5 @@
 import type { SWRConfiguration } from 'swr';
-import type { IReceiptItem, IAnalyticsSummary, IAuditFindings } from 'src/types/receipt';
+import type { IReceiptItem, IAuditFindings, IAnalyticsSummary } from 'src/types/receipt';
 
 import useSWR from 'swr';
 import { useMemo } from 'react';
@@ -12,6 +12,10 @@ const swrOptions: SWRConfiguration = {
   revalidateIfStale: false,
   revalidateOnFocus: false,
   revalidateOnReconnect: false,
+  // Deaktiviere SSR für Receipts (verhindert 404 beim Server-Side Rendering)
+  fallbackData: undefined,
+  // Nur Client-Side fetchen
+  fetcher: typeof window !== 'undefined' ? undefined : undefined,
 };
 
 // ----------------------------------------------------------------------

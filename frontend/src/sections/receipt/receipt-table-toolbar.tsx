@@ -3,13 +3,12 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 import type { IReceiptTableFilters } from 'src/types/receipt';
 import type { CustomToolbarSettingsButtonProps } from 'src/components/custom-data-grid';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 import Button from '@mui/material/Button';
 import Select from '@mui/material/Select';
 import { Toolbar } from '@mui/x-data-grid';
 import MenuItem from '@mui/material/MenuItem';
-import Checkbox from '@mui/material/Checkbox';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 
@@ -19,9 +18,9 @@ import {
   ToolbarLeftPanel,
   ToolbarRightPanel,
   CustomToolbarQuickFilter,
-  CustomToolbarColumnsButton,
   CustomToolbarFilterButton,
   CustomToolbarExportButton,
+  CustomToolbarColumnsButton,
   CustomToolbarSettingsButton,
 } from 'src/components/custom-data-grid';
 

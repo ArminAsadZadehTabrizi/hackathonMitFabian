@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useState, useCallback } from 'react';
 
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -9,8 +9,9 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 
-import { Iconify } from 'src/components/iconify';
 import { useTranslate } from 'src/locales';
+
+import { Iconify } from 'src/components/iconify';
 
 // ----------------------------------------------------------------------
 
@@ -81,6 +82,7 @@ export function ReceiptUploadZone({ onUpload, disabled }: ReceiptUploadZoneProps
             setUploadProgress(0);
           }, 500);
         } catch (error) {
+          console.error(error);
           setIsProcessing(false);
           setUploadProgress(0);
         }
@@ -119,6 +121,7 @@ export function ReceiptUploadZone({ onUpload, disabled }: ReceiptUploadZoneProps
             setUploadProgress(0);
           }, 500);
         } catch (error) {
+          console.error(error);
           setIsProcessing(false);
           setUploadProgress(0);
         }

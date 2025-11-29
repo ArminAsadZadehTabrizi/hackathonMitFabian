@@ -51,14 +51,14 @@ export const signInWithPassword = async ({
   email,
   password,
 }: SignInParams): Promise<AuthTokenResponsePassword> => {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const response = await supabase.auth.signInWithPassword({ email, password });
 
-  if (error) {
-    console.error(error);
-    throw error;
+  if (response.error) {
+    console.error(response.error);
+    throw response.error;
   }
 
-  return { data, error };
+  return response;
 };
 
 /** **************************************
@@ -70,7 +70,7 @@ export const signUp = async ({
   firstName,
   lastName,
 }: SignUpParams): Promise<AuthResponse> => {
-  const { data, error } = await supabase.auth.signUp({
+  const response = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -78,6 +78,7 @@ export const signUp = async ({
       data: { display_name: `${firstName} ${lastName}` },
     },
   });
+  const { data, error } = response;
 
   if (error) {
     console.error(error);
@@ -88,7 +89,7 @@ export const signUp = async ({
     throw new Error('This user already exists');
   }
 
-  return { data, error };
+  return response;
 };
 
 /** **************************************
@@ -110,10 +111,8 @@ export const signOut = async (): Promise<{
 /** **************************************
  * Reset password
  *************************************** */
-export const resetPassword = async ({
-  email,
-}: ResetPasswordParams): Promise<{ data: {}; error: null } | { data: null; error: AuthError }> => {
-  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+export const resetPassword = async ({ email }: ResetPasswordParams): Promise<void> => {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${window.location.origin}${paths.auth.supabase.updatePassword}`,
   });
 
@@ -121,20 +120,18 @@ export const resetPassword = async ({
     console.error(error);
     throw error;
   }
-
-  return { data, error };
 };
 
 /** **************************************
  * Update password
  *************************************** */
 export const updatePassword = async ({ password }: UpdatePasswordParams): Promise<UserResponse> => {
-  const { data, error } = await supabase.auth.updateUser({ password });
+  const response = await supabase.auth.updateUser({ password });
 
-  if (error) {
-    console.error(error);
-    throw error;
+  if (response.error) {
+    console.error(response.error);
+    throw response.error;
   }
 
-  return { data, error };
+  return response;
 };

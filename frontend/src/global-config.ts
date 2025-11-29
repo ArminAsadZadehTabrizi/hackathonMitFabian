@@ -31,10 +31,17 @@ export type ConfigValue = {
 
 // ----------------------------------------------------------------------
 
+// Debug: Zeige Environment-Variable
+const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL ?? '';
+if (typeof window !== 'undefined' && !serverUrl) {
+  console.warn('⚠️  NEXT_PUBLIC_SERVER_URL ist nicht gesetzt! API Calls werden fehlschlagen.');
+  console.warn('   Bitte setze NEXT_PUBLIC_SERVER_URL=http://localhost:8000 in .env.local');
+}
+
 export const CONFIG: ConfigValue = {
   appName: 'Minimal UI',
   appVersion: packageJson.version,
-  serverUrl: process.env.NEXT_PUBLIC_SERVER_URL ?? '',
+  serverUrl: serverUrl || (typeof window !== 'undefined' ? 'http://localhost:8000' : ''),
   assetsDir: process.env.NEXT_PUBLIC_ASSETS_DIR ?? '',
   isStaticExport: JSON.parse(process.env.BUILD_STATIC_EXPORT ?? 'false'),
   /**

@@ -19,6 +19,7 @@ class ReceiptDB(SQLModel, table=True):
     tax_amount: float
     currency: str = Field(default="EUR", max_length=3)
     category: Optional[str] = Field(default=None, index=True)
+    image_path: Optional[str] = Field(default=None)  # Pfad zum gespeicherten Bild
     
     # Audit flags
     flag_duplicate: bool = Field(default=False)

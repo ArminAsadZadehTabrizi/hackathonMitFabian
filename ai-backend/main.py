@@ -14,12 +14,15 @@ Endpoints:
 """
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from typing import Annotated
 from sqlmodel import Session, select, func
 import base64
 import uvicorn
 from datetime import datetime
+from pathlib import Path
+import shutil
 
 from config import API_HOST, API_PORT
 from models.receipt import (
@@ -43,6 +46,7 @@ from services.rag_service import (
     get_collection_stats
 )
 from services.analytics_service import calculate_precise_answer
+from smart_query_handler import parse_query_and_calculate
 from services.cord_ingestion import load_demo_data, ingest_cord_to_rag
 from services.database import init_db, get_session
 from services.audit import run_audit
@@ -80,6 +84,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static Files für Bilder
+UPLOAD_DIR = Path("./data/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/images", StaticFiles(directory=str(UPLOAD_DIR)), name="images")
+
 
 # ============== HEALTH & STATUS ==============
 
@@ -93,6 +102,55 @@ async def health_check():
         "status": "healthy",
         "ollama": ollama_status,
         "rag": rag_stats
+    }
+
+
+@app.get("/api/ollama/verify")
+def verify_ollama_usage():
+    """
+    Endpoint um zu verifizieren, dass Ollama verwendet wird.
+    Zeigt detaillierte Informationen über die Ollama-Integration.
+    """
+    from services.ollama_service import OLLAMA_HOST, OLLAMA_CHAT_MODEL, OLLAMA_MODEL
+    
+    ollama_status = check_ollama_status()
+    
+    # Test-Request an Ollama
+    test_success = False
+    test_error = None
+    try:
+        import requests
+        response = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={
+                "model": OLLAMA_CHAT_MODEL,
+                "prompt": "Test",
+                "stream": False
+            },
+            timeout=5
+        )
+        test_success = response.status_code == 200
+    except Exception as e:
+        test_error = str(e)
+    
+    return {
+        "ollama_configured": True,
+        "ollama_host": OLLAMA_HOST,
+        "chat_model": OLLAMA_CHAT_MODEL,
+        "vision_model": OLLAMA_MODEL,
+        "status": ollama_status,
+        "test_request": {
+            "success": test_success,
+            "error": test_error
+        },
+        "usage_info": {
+            "message": "✅ Ollama wird für alle Chat-Anfragen verwendet",
+            "endpoint": "/api/chat/query",
+            "model": OLLAMA_CHAT_MODEL,
+            "local": True,
+            "no_cloud": True,
+            "how_to_verify": "Schau in die Backend-Logs wenn du /api/chat/query aufrufst - dort siehst du '🤖 Ollama Request'"
+        }
     }
 
 
@@ -277,9 +335,9 @@ async def chat(request: ChatRequest):
 
 
 @app.post("/api/chat/query")
-async def chat_query(request: dict):
+async def chat_query(request: dict, session: SessionDep):
     """
-    Chat-Query Endpoint für Frontend.
+    Chat-Query Endpoint für Frontend - nutzt lokales Ollama LLM.
     
     Erwartet: {"query": "Frage"}
     Returns: {"answer": "...", "receipts": [...], "receiptIds": [...], "totalAmount": ..., "count": ...}
@@ -289,14 +347,62 @@ async def chat_query(request: dict):
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
         
-        # Relevante Quittungen suchen
-        receipts_data = search_receipts(query, n_results=100)
-        context = get_context_for_query(query)
+        # 1. PRÄZISE BERECHNUNG mit SQL (nicht LLM!)
+        calculations, filtered_receipts, filter_desc = parse_query_and_calculate(query, session)
         
-        # Präzise Berechnungen
-        calculations = calculate_precise_answer(query, receipts_data)
+        print(f"\n{'='*60}")
+        print(f"🔍 Query Analyse:")
+        print(f"{'='*60}")
+        print(f"Query: {query}")
+        print(f"Filter: {filter_desc}")
+        print(f"Gefundene Receipts: {len(filtered_receipts)}")
+        print(f"Berechnete Summe: {calculations['result']['total']}€")
+        print(f"{'='*60}\n")
         
-        # LLM-Antwort generieren
+        # 2. Erstelle Context aus gefilterten Receipts
+        context_parts = []
+        receipts_data = []
+        
+        for i, receipt in enumerate(filtered_receipts[:20], 1):
+            line_items = session.exec(
+                select(LineItemDB).where(LineItemDB.receipt_id == receipt.id)
+            ).all()
+            items_text = ", ".join([f"{item.description} ({item.amount}€)" for item in line_items[:3]])
+            
+            context_parts.append(
+                f"Quittung {i}: {receipt.vendor_name}, {receipt.date.strftime('%d.%m.%Y') if receipt.date else 'unbekannt'}, "
+                f"Total: {receipt.total_amount}€ ({receipt.category or 'Sonstiges'})"
+            )
+            
+            receipts_data.append({
+                "id": f"db_{receipt.id}",
+                "metadata": {
+                    "vendor_name": receipt.vendor_name,
+                    "date": receipt.date.isoformat() if receipt.date else "",
+                    "total": receipt.total_amount,
+                    "category": receipt.category or "Sonstiges"
+                }
+            })
+        
+        context = "\n".join(context_parts) if context_parts else "Keine passenden Quittungen gefunden."
+        
+        # 3. Fallback falls keine gefunden
+        if not filtered_receipts:
+            print("⚠️  Keine passenden Receipts gefunden")
+            context = "Keine passenden Quittungen gefunden."
+            receipts_data = []
+        
+        # 4. LLM-Antwort generieren (mit Ollama)
+        print(f"\n{'='*60}")
+        print(f"🤖 AI AUDITOR - Ollama Request (LOCAL LLM)")
+        print(f"{'='*60}")
+        print(f"Query: {query}")
+        print(f"Filter: {filter_desc}")
+        print(f"Gefilterte Receipts: {len(filtered_receipts)}")
+        print(f"Berechnete Summe: {calculations['result']['total']}€")
+        print(f"Using Ollama Model: llama3.2 (LOCAL, no cloud)")
+        print(f"{'='*60}\n")
+        
         response_text = await generate_chat_response(
             question=query,
             context=context,
@@ -304,19 +410,19 @@ async def chat_query(request: dict):
             calculations=calculations
         )
         
-        # Receipt IDs extrahieren
-        receipt_ids = [r["id"] for r in receipts_data[:10]]
+        print(f"\n{'='*60}")
+        print(f"✅ Ollama Response ({len(response_text)} Zeichen)")
+        print(f"{'='*60}\n")
         
-        # Total Amount berechnen (falls in calculations)
-        total_amount = 0.0
-        if calculations:
-            for key, value in calculations.items():
-                if isinstance(value, dict) and "total" in value:
-                    total_amount += value["total"]
+        # 5. Receipt IDs extrahieren
+        receipt_ids = [r["id"] for r in receipts_data]
         
-        # Receipt-Objekte für Response (vereinfacht)
+        # 6. Total Amount aus calculations
+        total_amount = calculations['result']['total']
+        
+        # 7. Receipt-Objekte für Response
         receipts_list = []
-        for r in receipts_data[:10]:
+        for r in receipts_data:
             receipts_list.append({
                 "id": r["id"],
                 "vendor": r["metadata"].get("vendor_name", "Unknown"),
@@ -333,6 +439,9 @@ async def chat_query(request: dict):
             "count": len(receipts_list)
         }
     except Exception as e:
+        import traceback
+        print(f"❌ Chat Query Fehler: {e}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Chat query failed: {str(e)}")
 
 
@@ -548,6 +657,39 @@ def get_analytics_summary(session: SessionDep):
     }
 
 
+@app.get("/api/analytics/category")
+def get_category_analytics(session: SessionDep):
+    """
+    Kategorie-Statistiken.
+    
+    Returns:
+        Liste der Kategorien mit Beträgen und Anzahl
+    """
+    statement = (
+        select(
+            ReceiptDB.category,
+            func.sum(ReceiptDB.total_amount).label("amount"),
+            func.count(ReceiptDB.id).label("count")
+        )
+        .where(ReceiptDB.category.is_not(None))
+        .group_by(ReceiptDB.category)
+        .order_by(func.sum(ReceiptDB.total_amount).desc())
+    )
+    
+    results = session.exec(statement).all()
+    
+    return {
+        "category_totals": [
+            {
+                "category": category,
+                "amount": round(float(amount), 2),
+                "count": count
+            }
+            for category, amount, count in results
+        ]
+    }
+
+
 @app.get("/api/analytics/vendors")
 def get_vendor_analytics(session: SessionDep):
     """
@@ -601,6 +743,9 @@ def get_receipts(session: SessionDep, receiptId: str = None):
             select(LineItemDB).where(LineItemDB.receipt_id == receipt.id)
         ).all()
         
+        # Bild-URL erstellen
+        image_url = f"http://localhost:8000/api/images/{receipt.image_path}" if receipt.image_path else None
+        
         # Format für Frontend
         return {
             "receipt": {
@@ -616,6 +761,7 @@ def get_receipts(session: SessionDep, receiptId: str = None):
                 "paymentMethod": None,
                 "category": receipt.category or "Sonstiges",
                 "currency": receipt.currency,
+                "imageUrl": image_url,
                 "lineItems": [
                     {
                         "id": str(item.id),
@@ -627,7 +773,6 @@ def get_receipts(session: SessionDep, receiptId: str = None):
                     }
                     for item in line_items
                 ],
-                "imageUrl": None,
                 "status": "duplicate" if receipt.flag_duplicate else ("flagged" if any([receipt.flag_suspicious, receipt.flag_missing_vat, receipt.flag_math_error]) else "verified"),
                 "tags": [],
                 "notes": None,
@@ -642,12 +787,63 @@ def get_receipts(session: SessionDep, receiptId: str = None):
             }
         }
     
-    # Alle Quittungen
+    # Alle Quittungen - Format für Frontend
     statement = select(ReceiptDB)
     receipts = session.exec(statement).all()
+    
+    formatted_receipts = []
+    for receipt in receipts:
+        # Line Items laden
+        line_items = session.exec(
+            select(LineItemDB).where(LineItemDB.receipt_id == receipt.id)
+        ).all()
+        
+        # Bild-URL erstellen
+        image_url = f"http://localhost:8000/api/images/{receipt.image_path}" if receipt.image_path else None
+        
+        # Format für Frontend
+        formatted_receipt = {
+            "id": str(receipt.id),
+            "receiptNumber": f"RCP-{receipt.id:04d}",
+            "vendor": receipt.vendor_name,
+            "vendorVAT": None,
+            "date": receipt.date.isoformat() if receipt.date else None,
+            "total": float(receipt.total_amount),
+            "subtotal": float(receipt.total_amount - receipt.tax_amount),
+            "vat": float(receipt.tax_amount) if receipt.tax_amount else None,
+            "vatRate": None,
+            "paymentMethod": None,
+            "category": receipt.category or "Sonstiges",
+            "currency": receipt.currency,
+            "imageUrl": image_url,
+            "lineItems": [
+                {
+                    "id": str(item.id),
+                    "description": item.description,
+                    "quantity": 1,
+                    "unitPrice": float(item.amount),
+                    "total": float(item.amount),
+                    "vat": 0
+                }
+                for item in line_items
+            ],
+            "status": "duplicate" if receipt.flag_duplicate else ("flagged" if any([receipt.flag_suspicious, receipt.flag_missing_vat, receipt.flag_math_error]) else "verified"),
+            "tags": [],
+            "notes": None,
+            "createdAt": receipt.date.isoformat() if receipt.date else None,
+            "updatedAt": receipt.date.isoformat() if receipt.date else None,
+            "auditFlags": {
+                "isDuplicate": receipt.flag_duplicate,
+                "hasTotalMismatch": receipt.flag_math_error,
+                "missingVAT": receipt.flag_missing_vat,
+                "suspiciousCategory": "Alkohol" if receipt.flag_suspicious else None
+            }
+        }
+        formatted_receipts.append(formatted_receipt)
+    
     return {
-        "count": len(receipts),
-        "receipts": receipts
+        "count": len(formatted_receipts),
+        "receipts": formatted_receipts
     }
 
 

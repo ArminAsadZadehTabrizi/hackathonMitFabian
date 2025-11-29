@@ -42,8 +42,6 @@ export function RenderCellStatus({ params }: ParamsProps) {
   } else if (status === 'Suspicious Category' || status === 'suspicious') {
     color = 'error';
     label = status === 'suspicious' ? 'Suspicious' : 'Suspicious Category';
-  } else if (status === 'duplicate') {
-    color = 'error';
   }
 
   return (

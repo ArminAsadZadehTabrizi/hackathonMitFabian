@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -9,17 +9,17 @@ import InputBase from '@mui/material/InputBase';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
 
-import { DashboardContent } from 'src/layouts/dashboard';
-import { useChatQuery } from 'src/actions/receipt';
-
-import { Iconify } from 'src/components/iconify';
-import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
-import { LoadingScreen } from 'src/components/loading-screen';
-
 import { paths } from 'src/routes/paths';
 import { RouterLink } from 'src/routes/components';
 
 import { fCurrency } from 'src/utils/format-number';
+
+import { useChatQuery } from 'src/actions/receipt';
+import { DashboardContent } from 'src/layouts/dashboard';
+
+import { Iconify } from 'src/components/iconify';
+import { LoadingScreen } from 'src/components/loading-screen';
+import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
 
 // ----------------------------------------------------------------------
 
@@ -80,6 +80,7 @@ export function AIAuditorView() {
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
+      console.error(error);
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',

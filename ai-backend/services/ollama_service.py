@@ -5,7 +5,7 @@ import ollama
 import base64
 import json
 import re
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 
 from config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
@@ -216,59 +216,72 @@ async def generate_chat_response(
     """
     # System Prompt mit präzisen Berechnungen
     if calculations:
-        calc_text = "\n\n═══════════════════════════════════════════════════\n"
-        calc_text += "⚠️  WICHTIG: PRÄZISE BEREICHNUNGEN (bereits berechnet in Python):\n"
-        calc_text += "═══════════════════════════════════════════════════\n"
-        calc_text += "Nutze diese Zahlen EXAKT! Rechne NICHT selbst nach!\n\n"
+        calc_text = "\n\n" + "="*60 + "\n"
+        calc_text += "⚠️  KRITISCH: PRÄZISE BERECHNUNGEN (Python - 100% korrekt!)\n"
+        calc_text += "="*60 + "\n\n"
+        
+        # Extrahiere die EINE relevante Zahl
+        main_total = None
+        main_count = None
+        main_filter = None
         
         for key, value in calculations.items():
-            if isinstance(value, dict):
-                if "total" in value:
-                    calc_text += f"📊 {key.replace('total_', '').upper()}:\n"
-                    calc_text += f"   GESAMT: {value['total']}€\n"
-                    if "items" in value and value["items"]:
-                        calc_text += f"   Anzahl Items: {len(value['items'])}\n"
-                        if "vendors" in value:
-                            calc_text += f"   Aufgeteilt auf:\n"
-                            for vendor, amount in value["vendors"].items():
-                                calc_text += f"     - {vendor}: {amount}€\n"
+            if isinstance(value, dict) and "total" in value:
+                main_total = value['total']
+                main_count = value.get('count', 0)
+                main_filter = value.get('filter', key.replace('total_', '').replace('_', ' ').title())
+                
+                # Zeige die EINE wichtige Zahl ganz klar
+                calc_text += f"🎯 FINALE ANTWORT (nutze EXAKT diese Zahl!):\n"
+                calc_text += f"   Gesamtbetrag: {main_total}€\n"
+                calc_text += f"   Anzahl Quittungen: {main_count}\n"
+                calc_text += f"   Filter: {main_filter}\n\n"
+                
+                # Details (falls vorhanden)
+                if "receipts" in value and len(value["receipts"]) > 0:
+                    calc_text += f"Details der ersten 5 Quittungen:\n"
+                    for i, item in enumerate(value["receipts"][:5], 1):
+                        calc_text += f"  {i}. {item.get('vendor', 'Unknown')}: {item.get('total', 0)}€\n"
                     calc_text += "\n"
-                elif "by_category" in key:
-                    calc_text += f"📊 Ausgaben nach Kategorie:\n"
-                    for cat, total in sorted(value.items(), key=lambda x: x[1], reverse=True):
-                        calc_text += f"   {cat}: {total}€\n"
-                    calc_text += "\n"
-            elif isinstance(value, list):
-                calc_text += f"📊 {key.replace('_', ' ').upper()}:\n"
-                for i, item in enumerate(value, 1):
-                    if isinstance(item, dict):
-                        calc_text += f"   {i}. {item.get('vendor', 'Unbekannt')}: {item.get('total', 0)}€ ({item.get('category', '')})\n"
-                calc_text += "\n"
+                
+                break  # Nur die erste (wichtigste) Berechnung
         
-        calc_text += "═══════════════════════════════════════════════════\n"
-        calc_text += "⚠️  KRITISCH: Die Zahl nach 'GESAMT:' ist die FINALE ANTWORT!\n"
-        calc_text += "⚠️  Kopiere diese Zahl EXAKT in deine Antwort - rechne NICHT!\n"
-        calc_text += "═══════════════════════════════════════════════════\n"
+        calc_text += "="*60 + "\n"
+        calc_text += "⚠️  DIE ZAHL NACH 'Gesamtbetrag:' IST DIE ANTWORT!\n"
+        calc_text += "⚠️  KOPIERE SIE EXAKT - RECHNE NICHT SELBST!\n"
+        calc_text += "="*60 + "\n"
+        
+        # Debug: Zeige Berechnungen
+        print(f"📊 Präzise Berechnungen für Ollama:")
+        print(f"   result: {main_total}€")
     else:
         calc_text = ""
     
-    system_prompt = f"""Du bist ein hilfreicher Assistent für Finanz-Analysen.
-Du beantwortest Fragen zu Quittungen und Ausgaben basierend auf den folgenden Daten.
+    system_prompt = f"""Du bist ein professioneller Finanz-Auditor und Buchhalter-Assistent.
+Du analysierst Quittungen und beantwortest Fragen zu Ausgaben basierend auf den folgenden Daten.
 
-VERFÜGBARE DATEN (Rohdaten):
+VERFÜGBARE QUITTUNGSDATEN:
 {context}
 {calc_text}
 
-REGELN:
-- Antworte auf Deutsch
-- ⚠️  KRITISCH: Wenn du "GESAMT: X€" in den PRÄZISEN BEREICHNUNGEN siehst, ist das die FINALE ANTWORT!
-- ⚠️  Kopiere diese Zahl EXAKT - rechne NICHT selbst nach!
-- ⚠️  Die Zahl ist bereits korrekt berechnet in Python - vertraue darauf!
-- Formatiere Geldbeträge mit € Symbol
-- Sei freundlich und hilfreich
-- Erkläre die Ergebnisse klar und strukturiert
-- Wenn präzise Berechnungen vorhanden sind, beginne deine Antwort IMMER mit: "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag [HIER DIE ZAHL AUS GESAMT EINFÜGEN]€"
-- Beispiel: Wenn "GESAMT: 43.98€" steht, dann schreibe: "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag 43.98€"
+⚠️  KRITISCHE REGELN - BITTE GENAU BEFOLGEN:
+1. Antworte IMMER auf Deutsch in einem professionellen, aber freundlichen Ton
+2. ⚠️  ABSOLUT KRITISCH: Wenn du "GESAMT: X€" in den PRÄZISEN BEREICHNUNGEN siehst, ist das die FINALE ANTWORT!
+3. ⚠️  Kopiere diese Zahl EXAKT - rechne NICHT selbst nach! Die Zahl ist bereits korrekt berechnet!
+4. ⚠️  Wenn du mehrere "GESAMT:" Werte siehst, nutze den Wert der zur Frage passt
+5. ⚠️  NIE selbst rechnen - immer die berechneten Zahlen verwenden!
+6. Formatiere Geldbeträge immer mit € Symbol und Komma als Dezimaltrennzeichen (z.B. 11.456,97€)
+7. Sei präzise und konkret - nenne konkrete Zahlen und Beträge
+8. Wenn mehrere Quittungen gefunden wurden, erwähne die Anzahl
+9. Wenn präzise Berechnungen vorhanden sind, beginne deine Antwort IMMER mit der Gesamtsumme
+10. Strukturiere deine Antwort klar: zuerst die Hauptantwort, dann Details
+
+FORMAT-VORLAGE FÜR ANTWORTEN:
+- "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag [HIER EXAKT DIE ZAHL AUS GESAMT EINFÜGEN]€. Dies setzt sich zusammen aus [ANZAHL] Quittungen."
+- "Ich habe [ANZAHL] Quittungen von [VENDOR] gefunden mit einem Gesamtbetrag von [EXAKT DIE ZAHL AUS GESAMT]€."
+- "Die Ausgaben für [KATEGORIE] betragen insgesamt [EXAKT DIE ZAHL AUS GESAMT]€ aus [ANZAHL] Quittungen."
+
+WICHTIG: Wenn du "GESAMT: 11456.97€" siehst, dann schreibe EXAKT: "11.456,97€" (mit Punkt als Tausendertrennzeichen und Komma als Dezimaltrennzeichen).
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -281,36 +294,65 @@ REGELN:
     messages.append({"role": "user", "content": question})
     
     # Chat mit optimierten Parametern
-    response = client.chat(
-        model=OLLAMA_CHAT_MODEL,
-        messages=messages,
-        options={
-            "temperature": 0.7,  # Kreativität für natürliche Antworten
-            "num_predict": 500   # Genug für vollständige Antworten
-        }
-    )
+    print(f"🤖 Ollama Request:")
+    print(f"   Model: {OLLAMA_CHAT_MODEL}")
+    print(f"   Host: {OLLAMA_HOST}")
+    print(f"   Question: {question[:100]}...")
+    print(f"   Context length: {len(context)} chars")
+    print(f"   Has calculations: {calculations is not None}")
     
-    return response["message"]["content"]
+    try:
+        response = client.chat(
+            model=OLLAMA_CHAT_MODEL,
+            messages=messages,
+            options={
+                "temperature": 0.3,  # Niedrigere Temperatur für präzisere Antworten
+                "num_predict": 800   # Mehr Tokens für vollständige Antworten
+            }
+        )
+        
+        answer = response["message"]["content"]
+        print(f"✅ Ollama Response received ({len(answer)} chars)")
+        print(f"   Response preview: {answer[:150]}...")
+        
+        return answer
+    except Exception as e:
+        print(f"❌ Ollama Error: {e}")
+        raise
 
 
 def check_ollama_status() -> dict:
     """Prüft ob Ollama läuft und welche Modelle verfügbar sind."""
     try:
-        models = client.list()
-        model_list = []
-        if isinstance(models, dict) and "models" in models:
-            for m in models["models"]:
-                if isinstance(m, dict) and "name" in m:
-                    model_list.append(m["name"])
-                elif isinstance(m, str):
-                    model_list.append(m)
-        return {
-            "status": "online",
-            "models": model_list
-        }
+        # Prüfe ob Ollama erreichbar ist
+        import requests
+        response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            model_list = []
+            if "models" in data:
+                for m in data["models"]:
+                    if isinstance(m, dict) and "name" in m:
+                        model_list.append(m["name"])
+                    elif isinstance(m, str):
+                        model_list.append(m)
+            
+            return {
+                "status": "online",
+                "models": model_list,
+                "host": OLLAMA_HOST,
+                "chat_model": OLLAMA_CHAT_MODEL,
+                "vision_model": OLLAMA_MODEL
+            }
+        else:
+            return {
+                "status": "error",
+                "error": f"HTTP {response.status_code}"
+            }
     except Exception as e:
         return {
             "status": "offline",
-            "error": str(e)
+            "error": str(e),
+            "host": OLLAMA_HOST
         }
 

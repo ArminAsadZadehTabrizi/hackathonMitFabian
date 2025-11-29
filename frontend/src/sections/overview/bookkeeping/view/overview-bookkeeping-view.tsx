@@ -3,28 +3,28 @@
 import Grid from '@mui/material/Grid';
 import Card from '@mui/material/Card';
 import Button from '@mui/material/Button';
-import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
+import Typography from '@mui/material/Typography';
+
+import { paths } from 'src/routes/paths';
+import { RouterLink } from 'src/routes/components';
+
+import { fCurrency } from 'src/utils/format-number';
 
 import { DashboardContent } from 'src/layouts/dashboard';
-import { RouterLink } from 'src/routes/components';
-import { paths } from 'src/routes/paths';
+import { useGetReceipts, useGetAnalytics, useGetMonthlyAnalytics, useGetCategoryAnalytics } from 'src/actions/receipt';
 
-import { useGetAnalytics, useGetMonthlyAnalytics, useGetCategoryAnalytics, useGetReceipts } from 'src/actions/receipt';
-
-import { fCurrency, fShortenNumber } from 'src/utils/format-number';
-
+import { AppWidgetSummary } from '../../app/app-widget-summary';
 import { EcommerceYearlySales } from '../../e-commerce/ecommerce-yearly-sales';
 import { EcommerceSaleByGender } from '../../e-commerce/ecommerce-sale-by-gender';
-import { AppWidgetSummary } from '../../app/app-widget-summary';
 
 // ----------------------------------------------------------------------
 
 export function OverviewBookkeepingView() {
   const theme = useTheme();
-  const { analytics, analyticsLoading } = useGetAnalytics();
-  const { monthly, monthlyLoading } = useGetMonthlyAnalytics();
-  const { categories, categoryLoading } = useGetCategoryAnalytics();
+  const { analytics } = useGetAnalytics();
+  const { monthly } = useGetMonthlyAnalytics();
+  const { categories } = useGetCategoryAnalytics();
   const { receipts, receiptsLoading } = useGetReceipts();
 
   // Prepare monthly chart data

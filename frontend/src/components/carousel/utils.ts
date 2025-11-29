@@ -3,14 +3,16 @@ import type { CarouselOptions } from './types';
 
 // ----------------------------------------------------------------------
 
-type ObjectValue = {
-  [key: string]: string | number;
-};
+type ObjectValue = Partial<Record<string, string | number>>;
 
 type InputValue = CarouselOptions['slidesToShow'];
 
+function isResponsiveObject(value: InputValue): value is Partial<Record<Breakpoint, string | number>> {
+  return !!value && typeof value === 'object';
+}
+
 export function getSlideSize(slidesToShow: InputValue): InputValue {
-  if (slidesToShow && typeof slidesToShow === 'object') {
+  if (isResponsiveObject(slidesToShow)) {
     return Object.keys(slidesToShow).reduce<ObjectValue>((acc, key) => {
       const sizeByKey = slidesToShow[key as Breakpoint];
       acc[key] = getValue(sizeByKey);
@@ -18,7 +20,7 @@ export function getSlideSize(slidesToShow: InputValue): InputValue {
     }, {});
   }
 
-  return getValue(slidesToShow);
+  return getValue(slidesToShow as string | number);
 }
 
 // ----------------------------------------------------------------------

@@ -9,22 +9,21 @@ import Stack from '@mui/material/Stack';
 import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Container from '@mui/material/Container';
-import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 
 import { paths } from 'src/routes/paths';
 import { RouterLink } from 'src/routes/components';
 
+import { fCurrency } from 'src/utils/format-number';
+
 import { useGetReceipt } from 'src/actions/receipt';
 import { DashboardContent } from 'src/layouts/dashboard';
 
-import { Iconify } from 'src/components/iconify';
 import { Label } from 'src/components/label';
+import { Iconify } from 'src/components/iconify';
 import { EmptyContent } from 'src/components/empty-content';
 import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
-
-import { fCurrency } from 'src/utils/format-number';
-import { fDate, fTime } from 'src/utils/format-time';
 
 // ----------------------------------------------------------------------
 
@@ -128,7 +127,7 @@ export function ReceiptDetailsView({ id }: Props) {
                 {receipt.imageUrl ? (
                   <Box
                     component="img"
-                    src={receipt.imageUrl}
+                    src={receipt.imageUrl.startsWith('http') ? receipt.imageUrl : `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8000'}${receipt.imageUrl}`}
                     alt={receipt.receiptNumber}
                     sx={{
                       maxWidth: '100%',
@@ -139,7 +138,10 @@ export function ReceiptDetailsView({ id }: Props) {
                     onClick={() => {
                       // Simple zoom - could be enhanced with a modal
                       const img = document.createElement('img');
-                      img.src = receipt.imageUrl!;
+                      const fullImageUrl = receipt.imageUrl!.startsWith('http') 
+                        ? receipt.imageUrl! 
+                        : `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8000'}${receipt.imageUrl}`;
+                      img.src = fullImageUrl;
                       img.style.position = 'fixed';
                       img.style.top = '50%';
                       img.style.left = '50%';

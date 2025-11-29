@@ -7,21 +7,21 @@ import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
-import { DashboardContent } from 'src/layouts/dashboard';
+import { paths } from 'src/routes/paths';
+
+import { fNumber, fCurrency } from 'src/utils/format-number';
+
 import { useGetAnalytics } from 'src/actions/receipt';
+import { DashboardContent } from 'src/layouts/dashboard';
 
 import { Iconify } from 'src/components/iconify';
 import { Chart, useChart } from 'src/components/chart';
 import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
 
-import { paths } from 'src/routes/paths';
-
-import { fCurrency, fNumber } from 'src/utils/format-number';
-
 // ----------------------------------------------------------------------
 
 export function BookkeepingAnalyticsView() {
-  const { analytics, analyticsLoading } = useGetAnalytics();
+  const { analytics } = useGetAnalytics();
 
   const categoryChart = useMemo(() => {
     if (!analytics?.categories) return null;

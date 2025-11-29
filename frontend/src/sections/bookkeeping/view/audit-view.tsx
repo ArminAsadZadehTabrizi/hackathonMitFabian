@@ -8,22 +8,22 @@ import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 
-import { DashboardContent } from 'src/layouts/dashboard';
+import { paths } from 'src/routes/paths';
+import { RouterLink } from 'src/routes/components';
+
+import { fDate } from 'src/utils/format-time';
+import { fCurrency } from 'src/utils/format-number';
+
 import { useGetAudit } from 'src/actions/receipt';
+import { DashboardContent } from 'src/layouts/dashboard';
 
 import { Label } from 'src/components/label';
 import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
 
-import { paths } from 'src/routes/paths';
-import { RouterLink } from 'src/routes/components';
-
-import { fCurrency } from 'src/utils/format-number';
-import { fDate } from 'src/utils/format-time';
-
 // ----------------------------------------------------------------------
 
 export function AuditView() {
-  const { audit, auditLoading } = useGetAudit();
+  const { audit } = useGetAudit();
 
   return (
     <DashboardContent maxWidth="xl">

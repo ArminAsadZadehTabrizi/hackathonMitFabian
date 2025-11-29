@@ -5,19 +5,19 @@ import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
-import { DashboardContent } from 'src/layouts/dashboard';
-import { useGetAnalytics } from 'src/actions/receipt';
-
-import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
-
 import { paths } from 'src/routes/paths';
 
 import { fCurrency } from 'src/utils/format-number';
 
+import { useGetAnalytics } from 'src/actions/receipt';
+import { DashboardContent } from 'src/layouts/dashboard';
+
+import { CustomBreadcrumbs } from 'src/components/custom-breadcrumbs';
+
 // ----------------------------------------------------------------------
 
 export function VendorsView() {
-  const { analytics, analyticsLoading } = useGetAnalytics();
+  const { analytics } = useGetAnalytics();
 
   return (
     <DashboardContent maxWidth="xl">
