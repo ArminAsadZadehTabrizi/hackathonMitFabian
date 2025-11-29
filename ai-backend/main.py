@@ -34,6 +34,7 @@ from services.rag_service import (
     get_context_for_query,
     get_collection_stats
 )
+from services.analytics_service import calculate_precise_answer
 from services.cord_ingestion import load_demo_data, ingest_cord_to_rag
 
 
@@ -144,25 +145,35 @@ async def chat(request: ChatRequest):
     """
     Chatbot mit RAG - Beantwortet Fragen zu den Quittungen.
     
+    Hybrid-Ansatz:
+    - Python berechnet Zahlen präzise (deterministisch)
+    - LLM formuliert Antwort natürlich
+    
     Beispiel-Fragen:
-    - "Wie viel habe ich im Januar für Essen ausgegeben?"
-    - "Zeige mir alle Tankstellen-Belege"
-    - "Was waren meine größten Ausgaben?"
+    - "Wie viel habe ich für Alkohol ausgegeben?" → Präzise Berechnung
+    - "Was waren meine Top 3 Ausgaben?" → Präzise Sortierung
+    - "Zeige mir alle Tankstellen-Belege" → Semantische Suche
     """
     try:
         # Relevante Quittungen suchen
+        receipts_data = search_receipts(request.message, n_results=100)
         context = get_context_for_query(request.message)
         
-        # Antwort generieren
+        # Präzise Berechnungen machen (Python)
+        calculations = calculate_precise_answer(request.message, receipts_data)
+        
+        # Antwort generieren (LLM formuliert, nutzt präzise Zahlen)
         response = await generate_chat_response(
             question=request.message,
             context=context,
-            history=request.history
+            history=request.history,
+            calculations=calculations
         )
         
         return {
             "response": response,
-            "sources_used": len(search_receipts(request.message, n_results=5))
+            "sources_used": len(receipts_data[:5]),
+            "calculations_used": calculations is not None
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")

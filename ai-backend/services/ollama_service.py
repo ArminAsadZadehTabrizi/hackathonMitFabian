@@ -134,7 +134,8 @@ async def extract_receipt_from_image(
 async def generate_chat_response(
     question: str,
     context: str,
-    history: list = []
+    history: list = [],
+    calculations: Optional[Dict] = None
 ) -> str:
     """
     Generiert eine Chat-Antwort basierend auf dem Kontext (RAG).
@@ -143,22 +144,66 @@ async def generate_chat_response(
         question: Die Benutzerfrage
         context: Relevante Quittungsdaten als Kontext
         history: Chat-Verlauf
+        calculations: Optional - bereits berechnete präzise Zahlen (Python)
     
     Returns:
         str: Die generierte Antwort
     """
+    # System Prompt mit präzisen Berechnungen
+    if calculations:
+        calc_text = "\n\n═══════════════════════════════════════════════════\n"
+        calc_text += "⚠️  WICHTIG: PRÄZISE BEREICHNUNGEN (bereits berechnet in Python):\n"
+        calc_text += "═══════════════════════════════════════════════════\n"
+        calc_text += "Nutze diese Zahlen EXAKT! Rechne NICHT selbst nach!\n\n"
+        
+        for key, value in calculations.items():
+            if isinstance(value, dict):
+                if "total" in value:
+                    calc_text += f"📊 {key.replace('total_', '').upper()}:\n"
+                    calc_text += f"   GESAMT: {value['total']}€\n"
+                    if "items" in value and value["items"]:
+                        calc_text += f"   Anzahl Items: {len(value['items'])}\n"
+                        if "vendors" in value:
+                            calc_text += f"   Aufgeteilt auf:\n"
+                            for vendor, amount in value["vendors"].items():
+                                calc_text += f"     - {vendor}: {amount}€\n"
+                    calc_text += "\n"
+                elif "by_category" in key:
+                    calc_text += f"📊 Ausgaben nach Kategorie:\n"
+                    for cat, total in sorted(value.items(), key=lambda x: x[1], reverse=True):
+                        calc_text += f"   {cat}: {total}€\n"
+                    calc_text += "\n"
+            elif isinstance(value, list):
+                calc_text += f"📊 {key.replace('_', ' ').upper()}:\n"
+                for i, item in enumerate(value, 1):
+                    if isinstance(item, dict):
+                        calc_text += f"   {i}. {item.get('vendor', 'Unbekannt')}: {item.get('total', 0)}€ ({item.get('category', '')})\n"
+                calc_text += "\n"
+        
+        calc_text += "═══════════════════════════════════════════════════\n"
+        calc_text += "⚠️  KRITISCH: Die Zahl nach 'GESAMT:' ist die FINALE ANTWORT!\n"
+        calc_text += "⚠️  Kopiere diese Zahl EXAKT in deine Antwort - rechne NICHT!\n"
+        calc_text += "═══════════════════════════════════════════════════\n"
+    else:
+        calc_text = ""
+    
     system_prompt = f"""Du bist ein hilfreicher Assistent für Finanz-Analysen.
 Du beantwortest Fragen zu Quittungen und Ausgaben basierend auf den folgenden Daten.
 
-VERFÜGBARE DATEN:
+VERFÜGBARE DATEN (Rohdaten):
 {context}
+{calc_text}
 
 REGELN:
 - Antworte auf Deutsch
-- Sei präzise mit Zahlen
-- Wenn du etwas nicht weißt, sage es ehrlich
-- Rechne Summen wenn nötig zusammen
+- ⚠️  KRITISCH: Wenn du "GESAMT: X€" in den PRÄZISEN BEREICHNUNGEN siehst, ist das die FINALE ANTWORT!
+- ⚠️  Kopiere diese Zahl EXAKT - rechne NICHT selbst nach!
+- ⚠️  Die Zahl ist bereits korrekt berechnet in Python - vertraue darauf!
 - Formatiere Geldbeträge mit € Symbol
+- Sei freundlich und hilfreich
+- Erkläre die Ergebnisse klar und strukturiert
+- Wenn präzise Berechnungen vorhanden sind, beginne deine Antwort IMMER mit: "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag [HIER DIE ZAHL AUS GESAMT EINFÜGEN]€"
+- Beispiel: Wenn "GESAMT: 43.98€" steht, dann schreibe: "Basierend auf den präzisen Berechnungen beträgt der Gesamtbetrag 43.98€"
 """
 
     messages = [{"role": "system", "content": system_prompt}]

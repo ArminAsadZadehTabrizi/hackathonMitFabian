@@ -24,6 +24,8 @@ chroma_client = None
 collection = None
 # Fallback: In-Memory Storage
 _memory_storage: List[Tuple[str, str, Dict]] = []  # [(id, document, metadata), ...]
+_receipt_objects: Dict[str, Receipt] = {}  # {id: Receipt} - Original Receipt-Objekte für präzise Berechnungen
+_receipt_objects: Dict[str, Receipt] = {}  # {id: Receipt} - Original Receipt-Objekte für präzise Berechnungen
 
 
 def init_rag():
@@ -76,6 +78,8 @@ def add_receipt_to_rag(receipt: Receipt, receipt_id: str):
     """
     Fügt eine Quittung zur RAG-Datenbank hinzu.
     """
+    global _receipt_objects
+    
     if embedding_model is None:
         init_rag()
     
@@ -104,6 +108,9 @@ def add_receipt_to_rag(receipt: Receipt, receipt_id: str):
         # Fallback: In-Memory
         _memory_storage.append((receipt_id, document, metadata))
     
+    # Original Receipt-Objekt speichern für präzise Berechnungen
+    _receipt_objects[receipt_id] = receipt
+    
     print(f"✅ Quittung {receipt_id} zur RAG-DB hinzugefügt")
 
 
@@ -114,6 +121,8 @@ def add_receipts_batch(receipts: List[tuple]):
     Args:
         receipts: Liste von (receipt_id, Receipt) Tupeln
     """
+    global _receipt_objects
+    
     if embedding_model is None:
         init_rag()
     
@@ -136,6 +145,8 @@ def add_receipts_batch(receipts: List[tuple]):
                 "category": receipt.category or "unknown",
                 "currency": receipt.currency
             })
+            # Original Receipt speichern
+            _receipt_objects[receipt_id] = receipt
         
         collection.upsert(
             ids=ids,
@@ -155,8 +166,17 @@ def add_receipts_batch(receipts: List[tuple]):
                 "currency": receipt.currency
             }
             _memory_storage.append((receipt_id, doc, metadata))
+            # Original Receipt speichern
+            _receipt_objects[receipt_id] = receipt
     
     print(f"✅ {len(receipts)} Quittungen zur RAG-DB hinzugefügt")
+
+
+def get_receipt_objects_by_ids(receipt_ids: List[str]) -> List[Receipt]:
+    """
+    Holt Receipt-Objekte anhand ihrer IDs für präzise Berechnungen.
+    """
+    return [_receipt_objects.get(rid) for rid in receipt_ids if rid in _receipt_objects]
 
 
 def search_receipts(
