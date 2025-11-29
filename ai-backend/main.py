@@ -231,7 +231,6 @@ async def extract_receipt_upload(file: UploadFile = File(...), session: Session 
             }
             response_data["db_error"] = str(db_error)
             return response_data
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
