@@ -1,0 +1,6 @@
+fastapi==0.115.6
+sqlmodel==0.0.22
+uvicorn[standard]==0.34.0
+pydantic==2.10.3
+datasets==4.4.1
+requests==2.32.3

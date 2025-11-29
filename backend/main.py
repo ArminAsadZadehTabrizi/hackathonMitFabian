@@ -8,6 +8,7 @@ from models import Receipt, LineItem
 from schemas import ReceiptCreate, ReceiptRead
 from audit import run_audit
 from analytics import router as analytics_router
+from chat import router as chat_router
 
 # Type alias for cleaner dependency injection
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -34,6 +35,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(analytics_router)
+app.include_router(chat_router)
 
 
 @app.get("/")

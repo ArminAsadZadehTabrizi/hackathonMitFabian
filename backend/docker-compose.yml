@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: hackathon-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount database directory to persist data
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:///./data/receipts.db
+    restart: unless-stopped
