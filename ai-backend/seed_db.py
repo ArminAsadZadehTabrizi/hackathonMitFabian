@@ -1,20 +1,22 @@
 """
-Seed Script - Generiert Testdaten für die AI-Backend Datenbank.
-Generiert 50 Quittungen mit verschiedenen Audit-Szenarien.
+Seed Script - Generates test data for the AI-Backend database.
+Creates 50 receipts with various audit scenarios.
 """
-
 from datetime import datetime, timedelta
-import random
 from sqlmodel import Session, delete, select
+import random
 
 from services.database import engine, init_db
 from models.db_models import ReceiptDB, LineItemDB
 from services.audit import run_audit
+from constants import VENDOR_CATEGORIES, SUSPICIOUS_ITEMS, get_category_for_vendor
 
 
-# Configuration
-VENDORS = ["Amazon", "Deutsche Bahn", "Lufthansa", "Rewe", "Shell", "MediaMarkt", "Pub Express", "IKEA", "Saturn", "Aldi"]
-CATEGORIES = ["Travel", "Meals", "Office Supplies", "Hardware", "Software", "Groceries", "Fuel", "Electronics"]
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+VENDORS = list(VENDOR_CATEGORIES.keys())
 
 CLEAN_ITEMS = [
     "Office Chair", "Desk Lamp", "Notebook", "Pen Set", "Coffee",
@@ -24,140 +26,121 @@ CLEAN_ITEMS = [
     "Laptop Stand", "Webcam", "Extension Cord", "Backpack", "Desk Organizer"
 ]
 
-SUSPICIOUS_ITEMS = [
-    "Beer", "Wine", "Vodka", "Whiskey", "Cigarettes", 
-    "Tobacco", "Rum", "Champagne", "Gin", "Tequila"
-]
 
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
 def random_date_last_90_days() -> datetime:
     """Generate a random datetime in the last 90 days."""
     days_ago = random.randint(0, 90)
     hours_ago = random.randint(0, 23)
-    minutes_ago = random.randint(0, 59)
-    return datetime.now() - timedelta(days=days_ago, hours=hours_ago, minutes=minutes_ago)
+    return datetime.now() - timedelta(days=days_ago, hours=hours_ago)
 
 
-def generate_clean_receipt() -> tuple[ReceiptDB, list[LineItemDB]]:
-    """Generate a clean receipt with correct math and no suspicious items."""
-    num_items = random.randint(1, 5)
+def create_line_items(count: int, items_list: list) -> tuple[list, float]:
+    """Create random line items and return total."""
     items = []
     total = 0.0
     
-    for _ in range(num_items):
+    for _ in range(count):
         amount = round(random.uniform(5.0, 150.0), 2)
         total += amount
-        items.append(LineItemDB(
-            description=random.choice(CLEAN_ITEMS),
-            amount=amount
-        ))
+        items.append(LineItemDB(description=random.choice(items_list), amount=amount))
     
-    tax_amount = round(total * 0.19, 2)  # 19% German VAT
+    return items, total
+
+
+# =============================================================================
+# RECEIPT GENERATORS
+# =============================================================================
+
+def generate_clean_receipt() -> tuple[ReceiptDB, list[LineItemDB]]:
+    """Generate a clean receipt with correct math and no suspicious items."""
+    vendor = random.choice(VENDORS)
+    items, total = create_line_items(random.randint(1, 5), CLEAN_ITEMS)
+    tax_amount = round(total * 0.19, 2)
     
     receipt = ReceiptDB(
-        vendor_name=random.choice(VENDORS),
+        vendor_name=vendor,
         date=random_date_last_90_days(),
         total_amount=round(total, 2),
         tax_amount=tax_amount,
         currency="EUR",
-        category=random.choice(CATEGORIES)
+        category=get_category_for_vendor(vendor)
     )
-    
     return receipt, items
 
 
 def generate_suspicious_receipt() -> tuple[ReceiptDB, list[LineItemDB]]:
     """Generate a receipt with suspicious items (alcohol/tobacco)."""
-    num_items = random.randint(2, 4)
+    # Suspicious items typically come from grocery stores, gas stations, or bars
+    suspicious_vendors = ["Rewe", "Shell", "Pub Express", "Aldi"]
+    vendor = random.choice(suspicious_vendors)
+    
     items = []
     total = 0.0
     
-    # Add at least one suspicious item
+    # Add suspicious item
     suspicious_amount = round(random.uniform(10.0, 50.0), 2)
     total += suspicious_amount
-    items.append(LineItemDB(
-        description=random.choice(SUSPICIOUS_ITEMS),
-        amount=suspicious_amount
-    ))
+    items.append(LineItemDB(description=random.choice(SUSPICIOUS_ITEMS), amount=suspicious_amount))
     
-    # Add some clean items
-    for _ in range(num_items - 1):
+    # Add clean items
+    for _ in range(random.randint(1, 3)):
         amount = round(random.uniform(5.0, 30.0), 2)
         total += amount
-        items.append(LineItemDB(
-            description=random.choice(CLEAN_ITEMS),
-            amount=amount
-        ))
-    
-    tax_amount = round(total * 0.19, 2)
+        items.append(LineItemDB(description=random.choice(CLEAN_ITEMS), amount=amount))
     
     receipt = ReceiptDB(
-        vendor_name=random.choice(["Rewe", "Shell", "Pub Express", "Aldi"]),
+        vendor_name=vendor,
         date=random_date_last_90_days(),
         total_amount=round(total, 2),
-        tax_amount=tax_amount,
+        tax_amount=round(total * 0.19, 2),
         currency="EUR",
-        category="Meals"
+        category=get_category_for_vendor(vendor)
     )
-    
     return receipt, items
 
 
 def generate_math_error_receipt() -> tuple[ReceiptDB, list[LineItemDB]]:
     """Generate a receipt where line items don't add up to total."""
-    num_items = random.randint(2, 5)
-    items = []
-    total = 0.0
+    vendor = random.choice(VENDORS)
+    items, total = create_line_items(random.randint(2, 5), CLEAN_ITEMS)
     
-    for _ in range(num_items):
-        amount = round(random.uniform(10.0, 100.0), 2)
-        total += amount
-        items.append(LineItemDB(
-            description=random.choice(CLEAN_ITEMS),
-            amount=amount
-        ))
-    
-    # Introduce math error by changing total
+    # Introduce math error
     wrong_total = round(total + random.uniform(5.0, 20.0), 2)
-    tax_amount = round(wrong_total * 0.19, 2)
     
     receipt = ReceiptDB(
-        vendor_name=random.choice(VENDORS),
+        vendor_name=vendor,
         date=random_date_last_90_days(),
         total_amount=wrong_total,
-        tax_amount=tax_amount,
+        tax_amount=round(wrong_total * 0.19, 2),
         currency="EUR",
-        category=random.choice(CATEGORIES)
+        category=get_category_for_vendor(vendor)
     )
-    
     return receipt, items
 
 
 def generate_missing_vat_receipt() -> tuple[ReceiptDB, list[LineItemDB]]:
     """Generate a receipt with missing VAT (tax_amount = 0)."""
-    num_items = random.randint(1, 4)
-    items = []
-    total = 0.0
-    
-    for _ in range(num_items):
-        amount = round(random.uniform(10.0, 100.0), 2)
-        total += amount
-        items.append(LineItemDB(
-            description=random.choice(CLEAN_ITEMS),
-            amount=amount
-        ))
+    vendor = random.choice(VENDORS)
+    items, total = create_line_items(random.randint(1, 4), CLEAN_ITEMS)
     
     receipt = ReceiptDB(
-        vendor_name=random.choice(VENDORS),
+        vendor_name=vendor,
         date=random_date_last_90_days(),
         total_amount=round(total, 2),
         tax_amount=0.0,  # Missing VAT!
         currency="EUR",
-        category=random.choice(CATEGORIES)
+        category=get_category_for_vendor(vendor)
     )
-    
     return receipt, items
 
+
+# =============================================================================
+# MAIN SEEDING FUNCTION
+# =============================================================================
 
 def seed_database():
     """
@@ -169,97 +152,69 @@ def seed_database():
     - 10% Missing VAT
     - 70% Clean receipts
     """
-    # Initialize database
-    print("📊 Initialisiere Datenbank...")
+    print("📊 Initializing database...")
     init_db()
     
     with Session(engine) as session:
-        # Check if data already exists
-        existing = session.exec(select(ReceiptDB)).first()
-        if existing:
-            print("⚠️  Datenbank enthält bereits Daten. Lösche alte Daten...")
+        # Clear existing data
+        if session.exec(select(ReceiptDB)).first():
+            print("⚠️  Database has existing data. Clearing...")
             session.exec(delete(LineItemDB))
             session.exec(delete(ReceiptDB))
             session.commit()
-            print("✅ Alte Daten gelöscht")
         
-        # Generate receipts
-        print("\n🌱 Generiere 50 Quittungen...")
+        print("\n🌱 Generating 50 receipts...")
         
-        receipts_created = 0
+        # Receipt generators by type
+        generators = {
+            "suspicious": (generate_suspicious_receipt, 0.10),
+            "math_error": (generate_math_error_receipt, 0.20),
+            "missing_vat": (generate_missing_vat_receipt, 0.30),
+            "clean": (generate_clean_receipt, 1.0)
+        }
         
-        # Create receipts with different audit scenarios
         for i in range(50):
-            # Determine receipt type based on distribution
+            # Select generator based on probability
             rand = random.random()
+            for gen_name, (gen_func, threshold) in generators.items():
+                if rand < threshold:
+                    receipt, items = gen_func()
+                    break
             
-            if rand < 0.10:  # 10% suspicious
-                receipt, items = generate_suspicious_receipt()
-                receipt_type = "Suspicious"
-            elif rand < 0.20:  # 10% math error
-                receipt, items = generate_math_error_receipt()
-                receipt_type = "Math Error"
-            elif rand < 0.30:  # 10% missing VAT
-                receipt, items = generate_missing_vat_receipt()
-                receipt_type = "Missing VAT"
-            else:  # 70% clean
-                receipt, items = generate_clean_receipt()
-                receipt_type = "Clean"
-            
-            # Add receipt to session and flush to get ID
+            # Save receipt
             session.add(receipt)
             session.flush()
             
-            # Link line items to receipt
+            # Link and save line items
             for item in items:
                 item.receipt_id = receipt.id
                 session.add(item)
             
-            # Run audit to set flags
+            # Run audit
             receipt = run_audit(receipt, items, session)
             
-            receipts_created += 1
-            
-            # Print progress every 10 receipts
-            if receipts_created % 10 == 0:
-                print(f"  ✓ {receipts_created}/50 Quittungen erstellt...")
+            if (i + 1) % 10 == 0:
+                print(f"  ✓ {i + 1}/50 receipts created...")
         
-        # Commit all changes
         session.commit()
         
-        print(f"\n✅ Erfolgreich {receipts_created} Quittungen erstellt!")
-        
         # Print statistics
-        print("\n📈 Statistiken:")
-        
-        # Query all receipts properly
         all_receipts = session.exec(select(ReceiptDB)).all()
-        
-        # Count flags
-        flagged_suspicious = len([r for r in all_receipts if r.flag_suspicious])
-        flagged_math = len([r for r in all_receipts if r.flag_math_error])
-        flagged_vat = len([r for r in all_receipts if r.flag_missing_vat])
-        flagged_duplicate = len([r for r in all_receipts if r.flag_duplicate])
-        
-        # Calculate totals
         total_amount = sum(r.total_amount for r in all_receipts)
         
-        print(f"  📝 Gesamt Quittungen: {len(all_receipts)}")
-        print(f"  💰 Gesamtbetrag: {total_amount:.2f} EUR")
-        print(f"  🍺 Verdächtige Items: {flagged_suspicious}")
-        print(f"  🔢 Rechenfehler: {flagged_math}")
-        print(f"  📋 Fehlende MwSt: {flagged_vat}")
-        print(f"  📑 Duplikate: {flagged_duplicate}")
+        print(f"\n✅ Successfully created {len(all_receipts)} receipts!")
+        print(f"\n📈 Statistics:")
+        print(f"  💰 Total: {total_amount:.2f} EUR")
+        print(f"  🍺 Suspicious: {sum(1 for r in all_receipts if r.flag_suspicious)}")
+        print(f"  🔢 Math errors: {sum(1 for r in all_receipts if r.flag_math_error)}")
+        print(f"  📋 Missing VAT: {sum(1 for r in all_receipts if r.flag_missing_vat)}")
+        print(f"  📑 Duplicates: {sum(1 for r in all_receipts if r.flag_duplicate)}")
 
 
 if __name__ == "__main__":
     print("=" * 50)
     print("🌱 Small Business Auto-Bookkeeper - Seed Script")
     print("=" * 50)
-    print()
     seed_database()
-    print()
+    print("\n✅ Database seeding complete!")
     print("=" * 50)
-    print("✅ Datenbank-Seeding abgeschlossen!")
-    print("=" * 50)
-

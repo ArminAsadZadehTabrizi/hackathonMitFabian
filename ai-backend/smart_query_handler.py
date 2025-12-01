@@ -1,31 +1,39 @@
 """
-Smart Query Handler - Verarbeitet Anfragen präzise mit SQL und gibt klare Anweisungen an Ollama
+Smart Query Handler - Precise SQL-based query processing for AI Auditor.
 
-Dieser Handler:
-1. Parst die User-Frage (Deutsch + Englisch)
-2. Erkennt Filter: Vendor, Kategorie, Betrag, Datum, Audit-Flags
-3. Führt SQL-Queries aus
-4. Berechnet präzise Summen in Python
-5. Gibt strukturierte Daten an das LLM
+This handler:
+1. Parses user questions (German + English)
+2. Detects filters: Vendor, Category, Amount, Date, Audit Flags
+3. Executes SQL queries
+4. Calculates precise sums in Python
+5. Returns structured data for LLM
 
-Das LLM formuliert dann nur die Antwort - es rechnet NICHT selbst!
+The LLM only formulates the response - it does NOT calculate!
 """
 from sqlmodel import Session, select
-from models.db_models import ReceiptDB, LineItemDB
-import re
-from typing import Dict, List, Tuple, Optional
+from models.db_models import ReceiptDB
 from datetime import datetime, timedelta
+from typing import Dict, List, Tuple
+import re
+
+from constants import (
+    CATEGORY_TRANSLATIONS,
+    AMOUNT_PATTERNS,
+    DATE_KEYWORDS,
+    AUDIT_KEYWORDS,
+    find_category_in_query
+)
 
 
 def parse_query_and_calculate(query: str, session: Session) -> Tuple[Dict, List[ReceiptDB], str]:
     """
-    Analysiert die Query und macht präzise SQL-Berechnungen.
+    Analyze query and perform precise SQL calculations.
     
-    Unterstützte Filter:
+    Supported filters:
     - Vendor: "von Saturn", "from Amazon"
-    - Kategorie: "für Elektronik", "for electronics"
-    - Betrag: "unter 100€", "über 200", "above 100", "below 50"
-    - Datum: "letzte Woche", "letzter Monat", "last month", "last week"
+    - Category: "für Elektronik", "for electronics"
+    - Amount: "unter 100€", "über 200", "above 100", "below 50"
+    - Date: "letzte Woche", "letzter Monat", "last month", "last week"
     - Audit: "suspicious", "duplicate", "missing VAT", "verdächtig"
     
     Returns:
@@ -33,153 +41,162 @@ def parse_query_and_calculate(query: str, session: Session) -> Tuple[Dict, List[
     """
     query_lower = query.lower()
     
-    # Hole ALLE Receipts
-    all_receipts = session.exec(select(ReceiptDB)).all()
-    filtered_receipts = list(all_receipts)
+    # Get all receipts
+    all_receipts = list(session.exec(select(ReceiptDB)).all())
+    filtered_receipts = all_receipts.copy()
     filters_applied = []
     
-    # ═══════════════════════════════════════════════════════════════
-    # 1. BETRAG-FILTER (Deutsch + Englisch)
-    # ═══════════════════════════════════════════════════════════════
+    # Apply filters
+    filtered_receipts, filters_applied = _apply_amount_filters(query_lower, filtered_receipts, filters_applied)
+    filtered_receipts, filters_applied = _apply_vendor_filter(query_lower, all_receipts, filtered_receipts, filters_applied)
+    filtered_receipts, filters_applied = _apply_category_filter(query_lower, filtered_receipts, filters_applied)
+    filtered_receipts, filters_applied = _apply_date_filters(query_lower, filtered_receipts, filters_applied)
+    filtered_receipts, filters_applied = _apply_audit_filters(query_lower, filtered_receipts, filters_applied)
     
-    # Unter/Below
-    under_match = re.search(r'(?:unter|below|less than|unter)\s+(\d+(?:[.,]\d+)?)', query_lower)
-    if under_match:
-        limit = float(under_match.group(1).replace(',', '.'))
-        filtered_receipts = [r for r in filtered_receipts if r.total_amount < limit]
-        filters_applied.append(f"unter {limit}€")
+    # Calculate statistics
+    calculations = _calculate_statistics(filtered_receipts, filters_applied)
+    filter_desc = " + ".join(filters_applied) if filters_applied else "alle Quittungen"
     
-    # Über/Above
-    over_match = re.search(r'(?:über|ueber|above|over|more than|greater than)\s+(\d+(?:[.,]\d+)?)', query_lower)
-    if over_match:
-        limit = float(over_match.group(1).replace(',', '.'))
-        filtered_receipts = [r for r in filtered_receipts if r.total_amount > limit]
-        filters_applied.append(f"über {limit}€")
+    return calculations, filtered_receipts, filter_desc
+
+
+# =============================================================================
+# FILTER FUNCTIONS
+# =============================================================================
+
+def _apply_amount_filters(query: str, receipts: List[ReceiptDB], filters: List[str]) -> Tuple[List[ReceiptDB], List[str]]:
+    """Apply amount-based filters (under, over, between)."""
+    # Under/Below
+    if match := re.search(AMOUNT_PATTERNS["under"], query):
+        limit = float(match.group(1).replace(',', '.'))
+        receipts = [r for r in receipts if r.total_amount < limit]
+        filters.append(f"unter {limit}€")
     
-    # Zwischen/Between
-    between_match = re.search(r'(?:zwischen|between)\s+(\d+(?:[.,]\d+)?)\s+(?:und|and)\s+(\d+(?:[.,]\d+)?)', query_lower)
-    if between_match:
-        min_val = float(between_match.group(1).replace(',', '.'))
-        max_val = float(between_match.group(2).replace(',', '.'))
-        filtered_receipts = [r for r in filtered_receipts if min_val <= r.total_amount <= max_val]
-        filters_applied.append(f"zwischen {min_val}€ und {max_val}€")
+    # Over/Above
+    if match := re.search(AMOUNT_PATTERNS["over"], query):
+        limit = float(match.group(1).replace(',', '.'))
+        receipts = [r for r in receipts if r.total_amount > limit]
+        filters.append(f"über {limit}€")
     
-    # ═══════════════════════════════════════════════════════════════
-    # 2. VENDOR-FILTER
-    # ═══════════════════════════════════════════════════════════════
-    all_vendors = list(set([r.vendor_name for r in all_receipts]))
-    for vendor in all_vendors:
-        if vendor.lower() in query_lower:
-            filtered_receipts = [r for r in filtered_receipts if r.vendor_name == vendor]
-            filters_applied.append(f"Vendor: {vendor}")
+    # Between
+    if match := re.search(AMOUNT_PATTERNS["between"], query):
+        min_val = float(match.group(1).replace(',', '.'))
+        max_val = float(match.group(2).replace(',', '.'))
+        receipts = [r for r in receipts if min_val <= r.total_amount <= max_val]
+        filters.append(f"zwischen {min_val}€ und {max_val}€")
+    
+    return receipts, filters
+
+
+def _apply_vendor_filter(query: str, all_receipts: List[ReceiptDB], receipts: List[ReceiptDB], filters: List[str]) -> Tuple[List[ReceiptDB], List[str]]:
+    """Apply vendor filter."""
+    vendors = list(set(r.vendor_name for r in all_receipts))
+    for vendor in vendors:
+        if vendor.lower() in query:
+            receipts = [r for r in receipts if r.vendor_name == vendor]
+            filters.append(f"Vendor: {vendor}")
             break
-    
-    # ═══════════════════════════════════════════════════════════════
-    # 3. KATEGORIE-FILTER
-    # ═══════════════════════════════════════════════════════════════
-    all_categories = list(set([r.category for r in all_receipts if r.category]))
-    for cat in all_categories:
-        if cat.lower() in query_lower:
-            filtered_receipts = [r for r in filtered_receipts if r.category == cat]
-            filters_applied.append(f"Kategorie: {cat}")
-            break
-    
-    # ═══════════════════════════════════════════════════════════════
-    # 4. DATUM-FILTER
-    # ═══════════════════════════════════════════════════════════════
+    return receipts, filters
+
+
+def _apply_category_filter(query: str, receipts: List[ReceiptDB], filters: List[str]) -> Tuple[List[ReceiptDB], List[str]]:
+    """Apply category filter (supports German and English)."""
+    if category := find_category_in_query(query):
+        receipts = [r for r in receipts if r.category == category]
+        filters.append(f"Kategorie: {category}")
+    return receipts, filters
+
+
+def _apply_date_filters(query: str, receipts: List[ReceiptDB], filters: List[str]) -> Tuple[List[ReceiptDB], List[str]]:
+    """Apply date-based filters."""
     today = datetime.now()
     
-    # Letzte Woche / Last week
-    if any(kw in query_lower for kw in ['letzte woche', 'letzten woche', 'last week', 'this week']):
-        week_ago = today - timedelta(days=7)
-        filtered_receipts = [r for r in filtered_receipts if r.date and r.date >= week_ago]
-        filters_applied.append("letzte Woche")
+    # Last week
+    if any(kw in query for kw in DATE_KEYWORDS["week"]):
+        cutoff = today - timedelta(days=7)
+        receipts = [r for r in receipts if r.date and r.date >= cutoff]
+        filters.append("letzte Woche")
     
-    # Letzter Monat / Last month
-    elif any(kw in query_lower for kw in ['letzter monat', 'letzten monat', 'last month', 'this month']):
-        month_ago = today - timedelta(days=30)
-        filtered_receipts = [r for r in filtered_receipts if r.date and r.date >= month_ago]
-        filters_applied.append("letzter Monat")
+    # Last month
+    elif any(kw in query for kw in DATE_KEYWORDS["month"]):
+        cutoff = today - timedelta(days=30)
+        receipts = [r for r in receipts if r.date and r.date >= cutoff]
+        filters.append("letzter Monat")
     
-    # Letztes Jahr / Last year
-    elif any(kw in query_lower for kw in ['letztes jahr', 'last year', 'this year']):
-        year_ago = today - timedelta(days=365)
-        filtered_receipts = [r for r in filtered_receipts if r.date and r.date >= year_ago]
-        filters_applied.append("letztes Jahr")
+    # Last year
+    elif any(kw in query for kw in DATE_KEYWORDS["year"]):
+        cutoff = today - timedelta(days=365)
+        receipts = [r for r in receipts if r.date and r.date >= cutoff]
+        filters.append("letztes Jahr")
     
-    # ═══════════════════════════════════════════════════════════════
-    # 5. AUDIT-FLAGS FILTER
-    # ═══════════════════════════════════════════════════════════════
+    return receipts, filters
+
+
+def _apply_audit_filters(query: str, receipts: List[ReceiptDB], filters: List[str]) -> Tuple[List[ReceiptDB], List[str]]:
+    """Apply audit flag filters."""
+    # Duplicates
+    if any(kw in query for kw in AUDIT_KEYWORDS["duplicate"]):
+        receipts = [r for r in receipts if r.flag_duplicate]
+        filters.append("Duplikate")
     
-    # Duplikate
-    if any(kw in query_lower for kw in ['duplicate', 'duplikat', 'doppelt']):
-        filtered_receipts = [r for r in filtered_receipts if r.flag_duplicate]
-        filters_applied.append("Duplikate")
+    # Suspicious
+    if any(kw in query for kw in AUDIT_KEYWORDS["suspicious"]):
+        receipts = [r for r in receipts if r.flag_suspicious]
+        filters.append("Verdächtig")
     
-    # Verdächtig / Suspicious
-    if any(kw in query_lower for kw in ['suspicious', 'verdächtig', 'verdaechtig', 'alkohol', 'alcohol', 'tabak', 'tobacco']):
-        filtered_receipts = [r for r in filtered_receipts if r.flag_suspicious]
-        filters_applied.append("Verdächtig")
+    # Missing VAT
+    if any(kw in query for kw in AUDIT_KEYWORDS["missing_vat"]):
+        receipts = [r for r in receipts if r.flag_missing_vat]
+        filters.append("Fehlende MwSt")
     
-    # Fehlende MwSt / Missing VAT
-    if any(kw in query_lower for kw in ['missing vat', 'fehlende mwst', 'ohne mwst', 'no vat', 'keine mwst']):
-        filtered_receipts = [r for r in filtered_receipts if r.flag_missing_vat]
-        filters_applied.append("Fehlende MwSt")
+    # Math error
+    if any(kw in query for kw in AUDIT_KEYWORDS["math_error"]):
+        receipts = [r for r in receipts if r.flag_math_error]
+        filters.append("Rechenfehler")
     
-    # Rechenfehler / Math error
-    if any(kw in query_lower for kw in ['math error', 'rechenfehler', 'mismatch', 'falsch berechnet']):
-        filtered_receipts = [r for r in filtered_receipts if r.flag_math_error]
-        filters_applied.append("Rechenfehler")
+    # All issues
+    if any(kw in query for kw in AUDIT_KEYWORDS["all_issues"]):
+        receipts = [r for r in receipts if any([
+            r.flag_duplicate, r.flag_suspicious, r.flag_missing_vat, r.flag_math_error
+        ])]
+        filters.append("Alle Audit-Probleme")
     
-    # Alle Probleme / All issues
-    if any(kw in query_lower for kw in ['problem', 'issue', 'fehler', 'flag', 'audit']):
-        filtered_receipts = [r for r in filtered_receipts if r.flag_duplicate or r.flag_suspicious or r.flag_missing_vat or r.flag_math_error]
-        filters_applied.append("Alle Audit-Probleme")
-    
-    # ═══════════════════════════════════════════════════════════════
-    # 6. BERECHNE STATISTIKEN
-    # ═══════════════════════════════════════════════════════════════
-    
-    total = sum(r.total_amount for r in filtered_receipts)
-    count = len(filtered_receipts)
+    return receipts, filters
+
+
+# =============================================================================
+# STATISTICS
+# =============================================================================
+
+def _calculate_statistics(receipts: List[ReceiptDB], filters: List[str]) -> Dict:
+    """Calculate statistics from filtered receipts."""
+    total = sum(r.total_amount for r in receipts)
+    count = len(receipts)
     avg = total / count if count > 0 else 0
     
     # Min/Max
-    min_receipt = min(filtered_receipts, key=lambda r: r.total_amount) if filtered_receipts else None
-    max_receipt = max(filtered_receipts, key=lambda r: r.total_amount) if filtered_receipts else None
+    min_receipt = min(receipts, key=lambda r: r.total_amount) if receipts else None
+    max_receipt = max(receipts, key=lambda r: r.total_amount) if receipts else None
     
-    # Top Vendors
+    # Top vendors
     vendor_totals = {}
-    for r in filtered_receipts:
+    for r in receipts:
         vendor_totals[r.vendor_name] = vendor_totals.get(r.vendor_name, 0) + r.total_amount
     top_vendors = sorted(vendor_totals.items(), key=lambda x: x[1], reverse=True)[:5]
     
-    # Top Categories
+    # Top categories
     category_totals = {}
-    for r in filtered_receipts:
+    for r in receipts:
         cat = r.category or "Sonstiges"
         category_totals[cat] = category_totals.get(cat, 0) + r.total_amount
     top_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)[:5]
     
-    # ═══════════════════════════════════════════════════════════════
-    # 7. ERSTELLE FILTER-BESCHREIBUNG
-    # ═══════════════════════════════════════════════════════════════
-    
-    if filters_applied:
-        filter_desc = " + ".join(filters_applied)
-    else:
-        filter_desc = "alle Quittungen"
-    
-    # ═══════════════════════════════════════════════════════════════
-    # 8. ERSTELLE CALCULATIONS-OBJEKT
-    # ═══════════════════════════════════════════════════════════════
-    
-    calculations = {
+    return {
         "result": {
             "total": round(total, 2),
             "count": count,
             "average": round(avg, 2),
-            "filter": filter_desc,
+            "filter": " + ".join(filters) if filters else "alle Quittungen",
             "min": {
                 "vendor": min_receipt.vendor_name if min_receipt else None,
                 "total": min_receipt.total_amount if min_receipt else None
@@ -204,53 +221,7 @@ def parse_query_and_calculate(query: str, session: Session) -> Tuple[Dict, List[
                         "math_error": r.flag_math_error
                     }
                 }
-                for r in filtered_receipts[:20]  # Max 20 für Details
+                for r in receipts[:20]
             ]
         }
     }
-    
-    return calculations, filtered_receipts, filter_desc
-
-
-def get_query_insights(query: str, calculations: Dict) -> str:
-    """
-    Generiert zusätzliche Insights basierend auf der Anfrage.
-    Diese werden dem LLM als Kontext mitgegeben.
-    """
-    result = calculations.get("result", {})
-    insights = []
-    
-    # Insights zu Gesamtsumme
-    total = result.get("total", 0)
-    count = result.get("count", 0)
-    
-    if count == 0:
-        insights.append("⚠️ Keine Quittungen gefunden, die den Kriterien entsprechen.")
-    else:
-        insights.append(f"📊 Gefunden: {count} Quittungen mit Gesamtsumme {total}€")
-        
-        # Durchschnitt
-        avg = result.get("average", 0)
-        if avg > 0:
-            insights.append(f"📈 Durchschnitt pro Quittung: {avg}€")
-        
-        # Min/Max
-        min_data = result.get("min", {})
-        max_data = result.get("max", {})
-        if min_data.get("vendor") and max_data.get("vendor"):
-            insights.append(f"📉 Kleinste: {min_data['total']}€ ({min_data['vendor']})")
-            insights.append(f"📈 Größte: {max_data['total']}€ ({max_data['vendor']})")
-        
-        # Top Vendor
-        top_vendors = result.get("top_vendors", [])
-        if top_vendors:
-            top = top_vendors[0]
-            insights.append(f"🏪 Top Vendor: {top['vendor']} ({top['total']}€)")
-        
-        # Top Category
-        top_cats = result.get("top_categories", [])
-        if top_cats:
-            top = top_cats[0]
-            insights.append(f"📁 Top Kategorie: {top['category']} ({top['total']}€)")
-    
-    return "\n".join(insights)
